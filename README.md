@@ -115,6 +115,12 @@ pytest
 
 The configured checks include TypeScript/Vite builds, Vitest/Supertest tests for the API health and unauthenticated group access, Vitest tests for the frontend request helper, and pytest tests for ML health, group hard constraints, and novelty. There are not yet database-backed integration tests for registration, group creation/invitations, or feedback; those require a test database and should be added before calling the backend integration-tested.
 
+## Deploy on Render
+
+The root `render.yaml` defines the static frontend, API, private ML service, and managed PostgreSQL database. To deploy, connect this GitHub repository to Render and create a Blueprint from the `main` branch. Review the service plans and monthly estimate before applying the Blueprint. Render generates the internal ML token and connects the service URLs and database URL automatically. The optional Ticketmaster and OpenAI keys can be added to the relevant service later.
+
+After deployment, wait for the database and services to report healthy, then open the frontend's Render URL. The API applies Prisma migrations at startup. New databases do not receive sample activities automatically; run `npm run db:seed --workspace backend` as a one-off job or through an authorized shell after the first deployment if you want the labeled sample catalog.
+
 ## Current deployment and data limitations
 
 - PostgreSQL migrations and seed data must be applied locally before the full product flow can run.
@@ -122,9 +128,9 @@ The configured checks include TypeScript/Vite builds, Vitest/Supertest tests for
 - Sample experience prices and attributes are illustrative development data and are labeled as such in the UI.
 - Catalog items without verified location or access attributes cannot satisfy a member’s strict travel/accessibility constraint.
 - The default rate limiter and model artifact storage are single-instance development defaults; production deployment should configure trusted proxy behavior, a shared rate-limit store, and persistent private model storage.
-- No cloud provider credentials or production accounts are configured in this repository, so deployment is not performed automatically.
+- No Render account credentials or production data are configured in this repository, so the Blueprint still needs to be created and reviewed in the Render dashboard.
 - A valid resume claim should use only measured offline evaluation and actual user outcomes displayed by the analytics page.
 
 ## Phase status
 
-The codebase includes the foundation, authentication/profile, groups/invitations, catalog, shortlist/voting, Ticketmaster event adapter, recommendation service, feedback/model evaluation, validated preference interpretation, and local Docker packaging/documentation. The production deploy step and full end-to-end verification still require a reachable PostgreSQL/Docker environment, working dependency downloads, Python 3.11+, and a configured hosting account/domain. Do not treat the repository as production-deployed until those steps have been completed and the deployment has been checked with real credentials and data.
+The codebase includes the foundation, authentication/profile, groups/invitations, catalog, shortlist/voting, Ticketmaster event adapter, recommendation service, feedback/model evaluation, validated preference interpretation, local Docker packaging, and a Render Blueprint. The production deploy step and full end-to-end verification still require a configured Render account and a successful dashboard deployment. Do not treat the repository as production-deployed until that deployment has been checked with real credentials and data.

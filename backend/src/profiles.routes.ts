@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "./db.js";
+import { mlServiceUrl } from "./mlService.js";
 import { requireAuth } from "./security.js";
 
 export const profilesRouter = Router();
@@ -11,7 +12,7 @@ profilesRouter.post("/preference-draft", async (request, response, next) => {
     if (!parsed.success) return response.status(400).json({ error: "Enter a short description of what your group enjoys" });
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (process.env.ML_SERVICE_TOKEN) headers["x-ml-service-token"] = process.env.ML_SERVICE_TOKEN;
-    const result = await fetch(`${process.env.ML_SERVICE_URL ?? "http://localhost:8000"}/preferences/parse`, {
+    const result = await fetch(`${mlServiceUrl()}/preferences/parse`, {
       method: "POST", headers, body: JSON.stringify(parsed.data), signal: AbortSignal.timeout(20_000),
     });
     if (!result.ok) return response.status(502).json({ error: "Could not interpret those preferences. You can enter them manually." });
