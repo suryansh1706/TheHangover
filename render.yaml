@@ -2,7 +2,7 @@ databases:
   - name: thehangover-db
     databaseName: hangover
     user: hangover
-    plan: 0.1c-256mb
+    plan: free
     region: singapore
 
 envVarGroups:
@@ -12,28 +12,25 @@ envVarGroups:
         generateValue: true
 
 services:
-  - type: pserv
+  - type: web
     name: thehangover-ml
     runtime: docker
     dockerfilePath: ./ml-service/Dockerfile
     dockerContext: .
-    plan: 1c-2g
+    plan: free
     region: singapore
-    disk:
-      name: enjoyment-model
-      mountPath: /app/data
-      sizeGB: 1
+    healthCheckPath: /health
     envVars:
       - fromGroup: thehangover-internal
-      - key: ENJOYMENT_MODEL_PATH
-        value: /app/data/enjoyment.joblib
+      - key: USE_SEMANTIC_ENCODER
+        value: "false"
 
   - type: web
     name: thehangover-api
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    plan: 0.5c-512mb
+    plan: free
     region: singapore
     healthCheckPath: /health
     envVars:
@@ -51,8 +48,8 @@ services:
       - key: ML_SERVICE_URL
         fromService:
           name: thehangover-ml
-          type: pserv
-          property: hostport
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - fromGroup: thehangover-internal
 
   - type: web

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from typing import Any
 
 import numpy as np
@@ -36,17 +37,23 @@ def _similarities(request: RecommendationRequest) -> tuple[np.ndarray, str]:
     if not request.activities:
         return np.zeros((len(request.members), 0)), "none"
     activity_text, member_text = _texts(request)
+    if os.getenv("USE_SEMANTIC_ENCODER", "true").casefold() in {"0", "false", "no"}:
+        return _tfidf_similarities(activity_text, member_text)
     try:
         encoder = _load_encoder()
         activity_vectors = np.asarray([_cached_activity_vector(text) for text in activity_text])
         member_vectors = encoder.encode(member_text, normalize_embeddings=True)
         return np.asarray(member_vectors) @ np.asarray(activity_vectors).T, "all-MiniLM-L6-v2"
     except Exception:
-        corpus = activity_text + member_text
-        matrix = TfidfVectorizer(ngram_range=(1, 2), strip_accents="unicode").fit_transform(corpus)
-        member_matrix = matrix[len(activity_text):]
-        activity_matrix = matrix[:len(activity_text)]
-        return cosine_similarity(member_matrix, activity_matrix), "tfidf-fallback"
+        return _tfidf_similarities(activity_text, member_text)
+
+
+def _tfidf_similarities(activity_text: list[str], member_text: list[str]) -> tuple[np.ndarray, str]:
+    corpus = activity_text + member_text
+    matrix = TfidfVectorizer(ngram_range=(1, 2), strip_accents="unicode").fit_transform(corpus)
+    member_matrix = matrix[len(activity_text):]
+    activity_matrix = matrix[:len(activity_text)]
+    return cosine_similarity(member_matrix, activity_matrix), "tfidf-fallback"
 
 
 def _blocked(activity: Activity, member: MemberPreference) -> bool:
