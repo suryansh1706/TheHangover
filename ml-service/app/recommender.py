@@ -37,7 +37,7 @@ def _similarities(request: RecommendationRequest) -> tuple[np.ndarray, str]:
         return np.zeros((len(request.members), 0)), "none"
     activity_text, member_text = _texts(request)
     try:
-        _load_encoder()
+        encoder = _load_encoder()
         activity_vectors = np.asarray([_cached_activity_vector(text) for text in activity_text])
         member_vectors = encoder.encode(member_text, normalize_embeddings=True)
         return np.asarray(member_vectors) @ np.asarray(activity_vectors).T, "all-MiniLM-L6-v2"

@@ -128,6 +128,3 @@ The configured checks include TypeScript/Vite builds, Vitest/Supertest tests for
 ## Phase status
 
 The codebase includes the foundation, authentication/profile, groups/invitations, catalog, shortlist/voting, Ticketmaster event adapter, recommendation service, feedback/model evaluation, validated preference interpretation, and local Docker packaging/documentation. The production deploy step and full end-to-end verification still require a reachable PostgreSQL/Docker environment, working dependency downloads, Python 3.11+, and a configured hosting account/domain. Do not treat the repository as production-deployed until those steps have been completed and the deployment has been checked with real credentials and data.
-
-#   T h e H a n g o v e r  
- 
