@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hangover}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hangover_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-hangover}
+    ports:
+      - "5432:5432"
+    volumes:
+      - hangover-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hangover} -d ${POSTGRES_DB:-hangover}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ml-service:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: ml-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-local-dev-token}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      ENJOYMENT_MODEL_PATH: /app/data/enjoyment.joblib
+    ports:
+      - "8000:8000"
+    volumes:
+      - hangover-model:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      BACKEND_PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hangover}:${POSTGRES_PASSWORD:-hangover_dev}@postgres:5432/${POSTGRES_DB:-hangover}?schema=public
+      FRONTEND_ORIGIN: http://localhost:5173
+      ML_SERVICE_URL: http://ml-service:8000
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-local-dev-token}
+      TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  frontend:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:4000
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  hangover-postgres:
+  hangover-model:
