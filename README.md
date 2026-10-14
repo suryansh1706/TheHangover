@@ -119,7 +119,7 @@ The configured checks include TypeScript/Vite builds, Vitest/Supertest tests for
 
 The root `render.yaml` defines a free demo with a static frontend, API, ML service, and managed PostgreSQL database. To deploy, connect this GitHub repository to Render and create a Blueprint from the `main` branch. The Blueprint generates the internal ML token and connects the service URLs and database URL automatically. It selects TF-IDF recommendations to stay within the free ML service memory limit; the semantic embedding model is disabled for this demo. The optional Ticketmaster and OpenAI keys can be added to the relevant service later.
 
-After deployment, wait for the database and services to report healthy, then open the frontend's Render URL. The API applies Prisma migrations at startup. New databases do not receive sample activities automatically; run `npm run db:seed --workspace backend` as a one-off job or through an authorized shell after the first deployment if you want the labeled sample catalog. Free web services sleep after 15 minutes idle, and free Postgres expires after 30 days, so treat this setup as a demo and do not store important data in it.
+After deployment, wait for the database and services to report healthy, then open the frontend's Render URL. The API applies Prisma migrations at startup and seeds the clearly labeled sample catalog because `SEED_SAMPLE_DATA` is enabled in this free demo Blueprint. Free web services sleep after 15 minutes idle, and free Postgres expires after 30 days, so treat this setup as a demo and do not store important data in it.
 
 ## Current deployment and data limitations
 

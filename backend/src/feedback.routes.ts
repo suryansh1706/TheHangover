@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "./db.js";
-import { mlServiceUrl } from "./mlService.js";
+import { mlServiceTimeoutMs, mlServiceUrl } from "./mlService.js";
 import { requireAuth } from "./security.js";
 
 export const outingsRouter = Router();
@@ -100,7 +100,7 @@ outingsRouter.post("/outings/:outingId/feedback", async (request, response, next
         const result = await fetch(`${mlServiceUrl()}/models/train`, {
           method: "POST", headers,
           body: JSON.stringify({ rows: trainRows.map((row) => ({ outingId: row.outingId, userId: row.userId, enjoyment: row.enjoyment, features: row.featureSnapshot as Record<string, number> })) }),
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(mlServiceTimeoutMs),
         });
         if (result.ok) {
           modelTraining = await result.json();
