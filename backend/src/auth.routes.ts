@@ -9,7 +9,9 @@ authRouter.use(rateLimit({ windowMs: 15 * 60_000, limit: 25, standardHeaders: "d
 const COOKIE_NAME = "hangover_session";
 const SESSION_DAYS = 14;
 const secureCookie = process.env.NODE_ENV === "production";
-const cookieOptions = { httpOnly: true, secure: secureCookie, sameSite: "lax" as const, path: "/" };
+// Render gives each service its own onrender.com subdomain. Those subdomains
+// are treated as cross-site for cookies, so production auth needs SameSite=None.
+const cookieOptions = { httpOnly: true, secure: secureCookie, sameSite: secureCookie ? "none" as const : "lax" as const, path: "/" };
 
 const credentialsSchema = z.object({
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
