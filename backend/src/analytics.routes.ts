@@ -4,6 +4,7 @@ import { requireAuth } from "./security.js";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
+
 analyticsRouter.get("/", async (request, response, next) => {
   try {
     const uid = (request as typeof request & { userId: string }).userId;
