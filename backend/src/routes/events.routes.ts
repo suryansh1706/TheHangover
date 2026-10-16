@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "./security.js";
-import { eventSearchErrorCode, searchAndStoreEvents } from "./ticketmaster.service.js";
+import { requireAuth } from "../config/security.js";
+import { eventSearchErrorCode, searchAndStoreEvents } from "../services/ticketmaster.service.js";
 
 export const eventsRouter = Router();
 eventsRouter.get("/search", requireAuth, async (request, response, next) => {

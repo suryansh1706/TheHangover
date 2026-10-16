@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
-import { prisma } from "./db.js";
-import { hashPassword, newToken, readCookie, requireAuth, tokenDigest, verifyPassword } from "./security.js";
+import { prisma } from "../config/db.js";
+import { hashPassword, newToken, readCookie, requireAuth, tokenDigest, verifyPassword } from "../config/security.js";
 
 export const authRouter = Router();
 authRouter.use(rateLimit({ windowMs: 15 * 60_000, limit: 25, standardHeaders: "draft-7", legacyHeaders: false }));

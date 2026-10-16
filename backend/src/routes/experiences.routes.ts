@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
-import { prisma } from "./db.js";
-import { requireAuth } from "./security.js";
+import { prisma } from "../config/db.js";
+import { requireAuth } from "../config/security.js";
 
 export const experiencesRouter = Router();
 experiencesRouter.get("/", async (request, response, next) => {

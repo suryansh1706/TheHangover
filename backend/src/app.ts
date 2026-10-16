@@ -3,13 +3,13 @@ import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { authRouter } from "./auth.routes.js";
-import { groupsRouter } from "./groups.routes.js";
-import { experiencesRouter } from "./experiences.routes.js";
-import { profilesRouter } from "./profiles.routes.js";
-import { outingsRouter } from "./feedback.routes.js";
-import { eventsRouter } from "./events.routes.js";
-import { analyticsRouter } from "./analytics.routes.js";
+import { authRouter } from "./routes/auth.routes.js";
+import { groupsRouter } from "./routes/groups.routes.js";
+import { experiencesRouter } from "./routes/experiences.routes.js";
+import { profilesRouter } from "./routes/profiles.routes.js";
+import { outingsRouter } from "./routes/feedback.routes.js";
+import { eventsRouter } from "./routes/events.routes.js";
+import { analyticsRouter } from "./routes/analytics.routes.js";
 
 const env = z.object({
   NODE_ENV: z.string().default("development"),

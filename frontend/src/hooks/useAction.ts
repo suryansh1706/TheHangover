@@ -1,10 +1,12 @@
 import { useState } from "react";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
+
 export function useAction() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  
   const act: Action = async (work) => {
     setBusy(true);
     setError("");

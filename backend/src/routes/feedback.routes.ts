@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "./db.js";
-import { mlServiceTimeoutMs, mlServiceUrl } from "./mlService.js";
-import { requireAuth } from "./security.js";
+import { prisma } from "../config/db.js";
+import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
+import { requireAuth } from "../config/security.js";
 
 export const outingsRouter = Router();
 outingsRouter.use(requireAuth);

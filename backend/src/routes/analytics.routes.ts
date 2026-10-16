@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { prisma } from "./db.js";
-import { requireAuth } from "./security.js";
+import { prisma } from "../config/db.js";
+import { requireAuth } from "../config/security.js";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);

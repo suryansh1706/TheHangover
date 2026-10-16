@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { prisma } from "./db.js";
+import { prisma } from "../config/db.js";
 
 const searchSchema = z.object({
   keyword: z.string().trim().max(100).optional(),

@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "./db.js";
-import { mlServiceTimeoutMs, mlServiceUrl } from "./mlService.js";
-import { newToken, requireAuth, tokenDigest } from "./security.js";
+import { prisma } from "../config/db.js";
+import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
+import { newToken, requireAuth, tokenDigest } from "../config/security.js";
 
 export const groupsRouter = Router();
 groupsRouter.use(requireAuth);
