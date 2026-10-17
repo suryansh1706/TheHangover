@@ -19,6 +19,7 @@ export type AppPageContextValue = {
   setGroupId: Dispatch<SetStateAction<string>>;
   experiences: Experience[];
   suggestions: Suggestion[];
+  invalidateRecommendations: () => void;
   enjoymentModelVersion: string | null;
   filters: Filters;
   setFilters: Dispatch<SetStateAction<Filters>>;
@@ -59,7 +60,7 @@ export type AppPageContextValue = {
   saveGroupSettings: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   savePreferences: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   interpretPreferences: (onSuccess?: (anyIntensity: boolean) => void) => Promise<void>;
-  recommend: () => Promise<void>;
+  recommend: (filters?: Filters, silent?: boolean) => Promise<void>;
   searchLiveEvents: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   addToShortlist: (id: string) => Promise<void>;
   vote: (id: string, choice: VoteChoice) => Promise<void>;

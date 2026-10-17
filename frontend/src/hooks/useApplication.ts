@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { categories } from "../constants";
@@ -12,7 +12,7 @@ import { useGroups } from "./useGroups";
 export function useApplication() {
   const location = useLocation();
   const navigate = useNavigate();
-  const setPage = (page: string) => navigate(page === "discover" ? "/" : `/${page}`);
+  const setPage = useCallback((page: string) => navigate(page === "discover" ? "/" : `/${page}`), [navigate]);
   const action = useAction();
   const { setError } = action;
   const groupActionsRef = useRef<{ loadGroups: () => Promise<void>; clearGroups: () => void }>({

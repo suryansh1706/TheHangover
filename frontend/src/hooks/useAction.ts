@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
 
@@ -7,7 +7,7 @@ export function useAction() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   
-  const act: Action = async (work) => {
+  const act: Action = useCallback(async (work) => {
     setBusy(true);
     setError("");
     setNotice("");
@@ -18,6 +18,6 @@ export function useAction() {
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
   return { busy, error, notice, setError, setNotice, act };
 }

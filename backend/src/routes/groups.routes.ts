@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../config/db.js";
 import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
 import { newToken, requireAuth, tokenDigest } from "../config/security.js";
@@ -129,6 +130,12 @@ groupsRouter.post("/:groupId/shortlist/:experienceId", async (request, response,
 groupsRouter.get("/:groupId/recommendations", async (request, response, next) => {
   try {
     const groupId = request.params.groupId;
+    const filters = z.object({
+      category: z.string().trim().max(60).optional(),
+      budget: z.coerce.number().int().min(0).optional(),
+      intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
+      q: z.string().trim().max(100).optional(),
+    }).parse(request.query);
     const group = await prisma.group.findFirst({
       where: { id: groupId, memberships: { some: { userId: userId(request) } } },
       include: {
@@ -137,7 +144,12 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
       },
     });
     if (!group) return response.status(404).json({ error: "Group not found" });
-    const activities = await prisma.experience.findMany({ where: { active: true } });
+    const activityFilters: Prisma.ExperienceWhereInput[] = [];
+    if (filters.category) activityFilters.push({ category: { equals: filters.category, mode: "insensitive" } });
+    if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
+    if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
+    if (filters.q) activityFilters.push({ OR: [{ name: { contains: filters.q, mode: "insensitive" } }, { description: { contains: filters.q, mode: "insensitive" } }] });
+    const activities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
     const payload = {
       groupId,
       modelVersion: "group-content-v1",

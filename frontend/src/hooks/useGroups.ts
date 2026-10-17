@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { emptyGroupPreferences } from "../constants";
 import type { Group, GroupPreferences, Suggestion, User, VoteChoice } from "../types";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
+type RecommendationFilters = { q: string; category: string; budget: string; intensity: string };
 export function useGroups(
   user: User | null,
   act: Action,
@@ -19,6 +20,7 @@ export function useGroups(
   const [newGroup, setNewGroup] = useState("");
   const [groupSettings, setGroupSettings] = useState<GroupPreferences>(emptyGroupPreferences);
   const [groupName, setGroupName] = useState("");
+  const recommendationRequest = useRef(0);
   const activeGroup = groups.find((group) => group.id === groupId);
   const isGroupOwner =
     activeGroup?.memberships.some(
@@ -105,25 +107,37 @@ export function useGroups(
       setNotice("Group settings saved. Recommendations will use these limits.");
     });
   }
-  async function recommend() {
+  const invalidateRecommendations = useCallback(() => {
+    recommendationRequest.current += 1;
+    setSuggestions([]);
+  }, []);
+  const recommend = useCallback(async (filters?: RecommendationFilters, silent = false) => {
     if (!groupId) {
       setError("Create a group or join one to get group recommendations.");
       return;
     }
+    const requestId = ++recommendationRequest.current;
+    setSuggestions([]);
     await act(async () => {
+      const query = new URLSearchParams();
+      if (filters?.q.trim()) query.set("q", filters.q.trim());
+      if (filters?.category) query.set("category", filters.category);
+      if (filters?.budget) query.set("budget", filters.budget);
+      if (filters?.intensity) query.set("intensity", filters.intensity);
       const result = await api<{
         recommendations: Suggestion[];
         enjoymentModelVersion: string | null;
-      }>(`/api/groups/${groupId}/recommendations`);
+      }>(`/api/groups/${groupId}/recommendations?${query}`);
+      if (requestId !== recommendationRequest.current) return;
       setSuggestions(result.recommendations);
       setEnjoymentModelVersion(result.enjoymentModelVersion);
-      setPage("discover");
-      if (!result.recommendations.length)
+      if (!silent) setPage("discover");
+      if (!silent && !result.recommendations.length)
         setNotice(
           "No activities meet every group member\u2019s stated hard constraints. Try broadening a budget or preference.",
         );
     });
-  }
+  }, [act, groupId, setError, setNotice, setPage]);
   async function addToShortlist(experienceId: string) {
     if (!groupId) return setError("Choose or create a group first.");
     await act(async () => {
@@ -149,8 +163,8 @@ export function useGroups(
 
   const clearGroups = useCallback(() => {
     setGroups([]);
-    setSuggestions([]);
-  }, []);
+    invalidateRecommendations();
+  }, [invalidateRecommendations]);
 
   return {
     groups,
@@ -160,6 +174,7 @@ export function useGroups(
     setGroupId,
     suggestions,
     setSuggestions,
+    invalidateRecommendations,
     enjoymentModelVersion,
     inviteToken,
     setInviteToken,

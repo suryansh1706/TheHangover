@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useAppPageContext } from "../hooks/useAppPageContext";
 import { PageHeading } from "../components/PageHeading";
 import { ExperienceCard } from "../components/ExperienceCard";
@@ -9,6 +10,7 @@ export function DiscoverPage() {
     setGroupId,
     experiences,
     suggestions,
+    invalidateRecommendations,
     enjoymentModelVersion,
     filters,
     setFilters,
@@ -28,6 +30,14 @@ export function DiscoverPage() {
     markTried,
     categories,
   } = useAppPageContext();
+
+  useEffect(() => {
+    invalidateRecommendations();
+    if (!groupId) return;
+    const timer = window.setTimeout(() => void recommend(filters, true), 350);
+    return () => window.clearTimeout(timer);
+  }, [filters, groupId, invalidateRecommendations, recommend]);
+
   return (
     <>
       <PageHeading
@@ -53,7 +63,7 @@ export function DiscoverPage() {
             ))}
           </select>
         </label>
-        <button className="button primary" onClick={recommend} disabled={busy || !groupId}>
+        <button className="button primary" onClick={() => void recommend(filters)} disabled={busy || !groupId}>
           {busy ? "Finding ideas…" : "✦ Find group picks"}
         </button>
       </div>
