@@ -194,7 +194,13 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (process.env.ML_SERVICE_TOKEN) headers["x-ml-service-token"] = process.env.ML_SERVICE_TOKEN;
     const mlResponse = await fetch(`${mlServiceUrl()}/recommendations`, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(mlServiceTimeoutMs) });
-    if (!mlResponse.ok) return response.status(502).json({ error: "Recommendation service could not score this group" });
+    if (!mlResponse.ok) {
+      console.error("Recommendation service returned an error", {
+        status: mlResponse.status,
+        statusText: mlResponse.statusText,
+      });
+      return response.status(502).json({ error: "Recommendation service could not score this group" });
+    }
     const result = await mlResponse.json() as { modelVersion: string; recommendations: Array<{ activityId: string }> };
     await prisma.recommendationRun.create({ data: { groupId, modelVersion: result.modelVersion, inputSnapshot: payload, resultSnapshot: result } });
     const selected = new Set(result.recommendations.map(({ activityId }) => activityId));
