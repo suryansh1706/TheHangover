@@ -78,7 +78,7 @@ export function AppLayout({
             <Notice type="error">
               {error}
               <button className="dismiss" onClick={() => setError("")}>
-                \u00D7
+                ×
               </button>
             </Notice>
           )}
@@ -86,7 +86,7 @@ export function AppLayout({
             <Notice type="success">
               {notice}
               <button className="dismiss" onClick={() => setNotice("")}>
-                \u00D7
+                ×
               </button>
             </Notice>
           )}

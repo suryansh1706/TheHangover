@@ -682,8 +682,9 @@ button:disabled {
   inset: 0;
   background: #1c211eb3;
   display: grid;
-  place-items: center;
+  place-items: start center;
   padding: 20px;
+  overflow-y: auto;
   z-index: 5;
 }
 .modal {
@@ -692,6 +693,8 @@ button:disabled {
   gap: 15px;
   position: relative;
   box-shadow: 0 20px 80px #0003;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 .modal-close {
   position: absolute;

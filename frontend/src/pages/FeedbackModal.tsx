@@ -59,7 +59,7 @@ export function FeedbackModal({
     >
       <form className="modal panel" onSubmit={submitFeedback}>
         <button type="button" className="modal-close" onClick={() => setFeedbackId("")}>
-          \u00D7
+          ×
         </button>
         <p className="eyebrow">AFTER THE OUTING</p>
         <h2>How did it go?</h2>
@@ -67,11 +67,11 @@ export function FeedbackModal({
           Enjoyment
           <select name="enjoyment" required>
             <option value="">Choose a rating</option>
-            <option value="1">1 \u2014 Not for me</option>
-            <option value="2">2 \u2014 Could be better</option>
-            <option value="3">3 \u2014 It was okay</option>
-            <option value="4">4 \u2014 Had a good time</option>
-            <option value="5">5 \u2014 Would do it again</option>
+            <option value="1">1 — Not for me</option>
+            <option value="2">2 — Could be better</option>
+            <option value="3">3 — It was okay</option>
+            <option value="4">4 — Had a good time</option>
+            <option value="5">5 — Would do it again</option>
           </select>
         </label>
         <label>
