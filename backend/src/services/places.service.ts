@@ -58,14 +58,16 @@ class GeoapifyProvider implements EventSearchProvider {
     const geocodePayload: unknown = await geocodeResponse.json();
     const geocodeResults = (geocodePayload as { results?: Array<{ lat?: number; lon?: number }> } | null)?.results;
     const center = geocodeResults?.[0];
-    if (!center || !Number.isFinite(center.lat) || !Number.isFinite(center.lon)) return [];
+    if (!center || !Number.isFinite(center.lat) || !Number.isFinite(center.lon))
+      throw new Error("EVENT_LOCATION_NOT_FOUND");
 
     const categories = categoriesForKeyword(input.keyword);
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
     placesUrl.searchParams.set("categories", categories.join(","));
     placesUrl.searchParams.set("filter", `circle:${center.lon},${center.lat},10000`);
+    placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
     placesUrl.searchParams.set("limit", "30");
-    if (input.keyword && categories.length === placeCategories.length)
+    if (input.city && input.keyword && categories.length === placeCategories.length)
       placesUrl.searchParams.set("name", input.keyword);
     placesUrl.searchParams.set("apiKey", apiKey);
 
@@ -153,5 +155,6 @@ export async function searchAndStoreEvents(rawQuery: unknown) {
 export function eventSearchErrorCode(error: unknown) {
   if (error instanceof Error && error.message === "EVENT_PROVIDER_NOT_CONFIGURED") return "NOT_CONFIGURED";
   if (error instanceof Error && error.message === "EVENT_PROVIDER_REQUEST_FAILED") return "UPSTREAM_FAILED";
+  if (error instanceof Error && error.message === "EVENT_LOCATION_NOT_FOUND") return "LOCATION_NOT_FOUND";
   return null;
 }
