@@ -648,6 +648,26 @@ button:disabled {
 .full-field {
   grid-column: 1/-1;
 }
+.preference-details summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 0;
+}
+.preference-details-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding-top: 18px;
+}
+.preference-details-fields .full-field {
+  grid-column: 1/-1;
+}
+.preference-details-fields [role="status"] {
+  display: block;
+  margin-top: 8px;
+}
 .preference-form .button {
   justify-self: start;
 }
@@ -851,6 +871,9 @@ button:disabled {
     width: 100%;
   }
   .preference-form {
+    grid-template-columns: 1fr;
+  }
+  .preference-details-fields {
     grid-template-columns: 1fr;
   }
   .full-field {

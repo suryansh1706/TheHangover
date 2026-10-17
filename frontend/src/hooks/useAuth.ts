@@ -68,7 +68,7 @@ export function useAuth(
     });
   }
 
-  async function interpretPreferences() {
+  async function interpretPreferences(onSuccess?: () => void) {
     const text = draftPreferences.naturalLanguage?.trim();
     if (!text) {
       setError("Write a preference description first.");
@@ -84,6 +84,7 @@ export function useAuth(
         ...result.draft,
         naturalLanguage: current.naturalLanguage,
       }));
+      onSuccess?.();
       setNotice(
         `Preference draft prepared with ${result.method}. Review the fields, then save when ready.`,
       );

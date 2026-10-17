@@ -99,6 +99,8 @@ class PreferenceDraft(BaseModel):
     dislikedTypes: list[str] = Field(default_factory=list)
     preferredTags: list[str] = Field(default_factory=list)
     dislikedTags: list[str] = Field(default_factory=list)
+    accessibility: list[str] = Field(default_factory=list)
+    dietaryNeeds: list[str] = Field(default_factory=list)
     setting: Literal["INDOOR", "OUTDOOR", "EITHER"] = "EITHER"
     maxIntensity: Literal["LOW", "MODERATE", "HIGH"] = "HIGH"
 
