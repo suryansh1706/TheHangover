@@ -38,7 +38,7 @@ export function useExperiences(
   async function searchLiveEvents(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!eventKeyword.trim() && !eventCity.trim()) {
-      setError("Enter an event keyword or city to search.");
+      setError("Enter a place keyword or city to search.");
       return;
     }
     await act(async () => {
@@ -55,8 +55,8 @@ export function useExperiences(
       ]);
       setNotice(
         result.experiences.length
-          ? `Added ${result.experiences.length} current event listing${result.experiences.length === 1 ? "" : "s"} from Ticketmaster.`
-          : "The provider returned no events for that search.",
+          ? `Added ${result.experiences.length} place${result.experiences.length === 1 ? "" : "s"} from Geoapify.`
+          : "Geoapify returned no places for that search.",
       );
     });
   }

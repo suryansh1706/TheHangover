@@ -94,35 +94,35 @@ export function DiscoverPage() {
       </div>
       <form className="event-search panel" onSubmit={searchLiveEvents}>
         <div>
-          <p className="eyebrow">LIVE EVENT LISTINGS</p>
+          <p className="eyebrow">LOCAL PLACES</p>
           <p>
-            Search real events and venue details from Ticketmaster. Current prices appear only when
-            the provider supplies them.
+            Find activities and places near a city using local OpenStreetMap listings.
           </p>
         </div>
         <input
-          aria-label="Event keyword"
-          placeholder="Event keyword"
+          aria-label="Place or activity keyword"
+          placeholder="Place or activity"
           value={eventKeyword}
           onChange={(event) => setEventKeyword(event.target.value)}
         />
         <input
-          aria-label="Event city"
+          aria-label="City"
           placeholder="City"
           value={eventCity}
           onChange={(event) => setEventCity(event.target.value)}
         />
         <input
-          aria-label="Event country code"
-          placeholder="Country (e.g. US)"
+          aria-label="Country code"
+          placeholder="Country (e.g. IN)"
           maxLength={2}
           value={eventCountry}
           onChange={(event) => setEventCountry(event.target.value.toUpperCase())}
         />
         <button className="button dark" disabled={busy}>
-          Search events
+          Search places
         </button>
       </form>
+      <p className="small-note">Powered by Geoapify · OpenStreetMap data</p>
       {suggestions.length > 0 && (
         <>
           <div className="section-heading">
