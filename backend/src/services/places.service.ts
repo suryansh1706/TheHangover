@@ -15,6 +15,7 @@ type ProviderPlace = {
     name?: string;
     categories?: string[];
     formatted?: string;
+    website?: string;
     lat?: number;
     lon?: number;
   };
@@ -25,18 +26,6 @@ export interface EventSearchProvider {
 }
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
-
-function categoriesForKeyword(keyword?: string) {
-  const value = keyword?.toLowerCase() ?? "";
-  if (/\b(food|restaurant|cafe|coffee|bar|dining|eat)\b/.test(value)) return ["catering"];
-  if (/\b(sport|sports|fitness|gym|swim|cycling|karting|climb)\b/.test(value)) return ["sport", "leisure"];
-  if (/\b(park|relax|spa|garden|picnic)\b/.test(value)) return ["leisure", "tourism"];
-  if (/\b(tour|tourism|sight|attraction|historic|monument)\b/.test(value)) return ["tourism"];
-  if (/\b(museum|cinema|movie|arcade|game|bowling|music|art|concert|escape|theatre|theater|zoo|aquarium)\b/.test(value)) {
-    return ["entertainment"];
-  }
-  return placeCategories;
-}
 
 class GeoapifyProvider implements EventSearchProvider {
   async search(input: Search): Promise<ProviderPlace[]> {
@@ -49,6 +38,7 @@ class GeoapifyProvider implements EventSearchProvider {
     const geocodeUrl = new URL("https://api.geoapify.com/v1/geocode/search");
     geocodeUrl.searchParams.set("text", location);
     geocodeUrl.searchParams.set("format", "json");
+    geocodeUrl.searchParams.set("type", "city");
     geocodeUrl.searchParams.set("limit", "1");
     geocodeUrl.searchParams.set("filter", `countrycode:${(input.countryCode ?? "IN").toLowerCase()}`);
     geocodeUrl.searchParams.set("apiKey", apiKey);
@@ -60,22 +50,33 @@ class GeoapifyProvider implements EventSearchProvider {
     const center = geocodeResults?.[0];
     if (!center || !Number.isFinite(center.lat) || !Number.isFinite(center.lon))
       throw new Error("EVENT_LOCATION_NOT_FOUND");
+    console.warn("[Geoapify] Geocoded center", { city: location, lat: center.lat, lon: center.lon });
 
-    const categories = categoriesForKeyword(input.keyword);
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
-    placesUrl.searchParams.set("categories", categories.join(","));
+    placesUrl.searchParams.set("categories", placeCategories.join(","));
     placesUrl.searchParams.set("filter", `circle:${center.lon},${center.lat},10000`);
     placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-    placesUrl.searchParams.set("limit", "30");
-    if (input.city && input.keyword && categories.length === placeCategories.length)
-      placesUrl.searchParams.set("name", input.keyword);
+    placesUrl.searchParams.set("limit", "100");
     placesUrl.searchParams.set("apiKey", apiKey);
+    const safePlacesUrl = new URL(placesUrl);
+    safePlacesUrl.searchParams.delete("apiKey");
+    console.warn("[Geoapify] Places request URL", safePlacesUrl.toString());
 
     const placesResponse = await fetch(placesUrl, { signal: AbortSignal.timeout(10_000) });
     if (!placesResponse.ok) throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
     const placesPayload: unknown = await placesResponse.json();
     const features = (placesPayload as { features?: ProviderPlace[] } | null)?.features;
-    return Array.isArray(features) ? features : [];
+    const results = Array.isArray(features) ? features : [];
+    console.warn("[Geoapify] Places feature count", results.length);
+    if (!input.keyword) return results;
+
+    const keyword = input.keyword.toLocaleLowerCase();
+    const matchingResults = results.filter((place) => {
+      const properties = place.properties;
+      return properties?.name?.toLocaleLowerCase().includes(keyword)
+        || properties?.categories?.some((category) => category.toLocaleLowerCase().includes(keyword));
+    });
+    return matchingResults.length ? matchingResults : results;
   }
 }
 
@@ -111,8 +112,8 @@ function placeData(place: ProviderPlace) {
     socialLevel: null,
     adventureLevel: null,
     source: "Geoapify (OpenStreetMap)",
-    sourceUrl: null,
-    bookingUrl: null,
+    sourceUrl: properties?.website ?? null,
+    bookingUrl: properties?.website ?? null,
     eventStartsAt: null,
     eventLocalDate: null,
     eventLocalTime: null,
@@ -141,9 +142,12 @@ export async function searchAndStoreEvents(rawQuery: unknown) {
     lastProviderCall = Date.now();
   } finally { release(); }
   const rows = places.map(placeData).filter((row): row is NonNullable<typeof row> => row !== null);
+  console.warn("[Geoapify] Named places ready to upsert", rows.length);
   await Promise.all(rows.map((row) => prisma.experience.upsert({ where: { slug: row.slug }, create: row, update: row })));
   const records = await prisma.experience.findMany({ where: { slug: { in: rows.map((row) => row.slug) } }, orderBy: { eventStartsAt: "asc" } });
-  cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records });
+  console.warn("[Geoapify] Places returned after upsert", records.length);
+  // Empty searches should not hide newly available provider results for the full cache window.
+  if (records.length > 0) cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records });
   if (cache.size > 500) {
     const now = Date.now();
     for (const [key, value] of cache) if (value.expiresAt <= now) cache.delete(key);
