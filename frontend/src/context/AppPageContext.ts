@@ -10,8 +10,8 @@ import type {
   User,
   VoteChoice,
 } from "../types";
+import type { DiscoveryFilters } from "../hooks/useExperiences";
 
-type Filters = { q: string; category: string; budget: string; intensity: string };
 export type AppPageContextValue = {
   user: User | null;
   groups: Group[];
@@ -21,8 +21,8 @@ export type AppPageContextValue = {
   suggestions: Suggestion[];
   invalidateRecommendations: () => void;
   enjoymentModelVersion: string | null;
-  filters: Filters;
-  setFilters: Dispatch<SetStateAction<Filters>>;
+  filters: DiscoveryFilters;
+  setFilters: Dispatch<SetStateAction<DiscoveryFilters>>;
   busy: boolean;
   error: string;
   notice: string;
@@ -35,12 +35,8 @@ export type AppPageContextValue = {
   setGroupSettings: Dispatch<SetStateAction<GroupPreferences>>;
   groupName: string;
   setGroupName: Dispatch<SetStateAction<string>>;
-  eventKeyword: string;
-  setEventKeyword: Dispatch<SetStateAction<string>>;
-  eventCity: string;
-  setEventCity: Dispatch<SetStateAction<string>>;
-  eventCountry: string;
-  setEventCountry: Dispatch<SetStateAction<string>>;
+  loadingPlaces: boolean;
+  useCurrentLocation: () => void;
   draftPreferences: Preferences;
   setDraftPreferences: Dispatch<SetStateAction<Preferences>>;
   feedbackId: string;
@@ -60,7 +56,7 @@ export type AppPageContextValue = {
   saveGroupSettings: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   savePreferences: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   interpretPreferences: (onSuccess?: (anyIntensity: boolean) => void) => Promise<void>;
-  recommend: (filters?: Filters, silent?: boolean) => Promise<void>;
+  recommend: (filters?: DiscoveryFilters, silent?: boolean) => Promise<void>;
   searchLiveEvents: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   addToShortlist: (id: string) => Promise<void>;
   vote: (id: string, choice: VoteChoice) => Promise<void>;

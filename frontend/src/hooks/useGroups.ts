@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { api } from "../api";
 import { emptyGroupPreferences } from "../constants";
 import type { Group, GroupPreferences, Suggestion, User, VoteChoice } from "../types";
+import type { DiscoveryFilters } from "./useExperiences";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
-type RecommendationFilters = { q: string; category: string; budget: string; intensity: string };
 export function useGroups(
   user: User | null,
   act: Action,
@@ -111,7 +111,7 @@ export function useGroups(
     recommendationRequest.current += 1;
     setSuggestions([]);
   }, []);
-  const recommend = useCallback(async (filters?: RecommendationFilters, silent = false) => {
+  const recommend = useCallback(async (filters?: DiscoveryFilters, silent = false) => {
     if (!groupId) {
       setError("Create a group or join one to get group recommendations.");
       return;

@@ -1,65 +1,115 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { api } from "../api";
-import type { Experience, User } from "../types";
+import type { Experience, Preferences, User } from "../types";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
+export type DiscoveryFilters = {
+  q: string;
+  city: string;
+  country: string;
+  category: string;
+  budget: string;
+  intensity: string;
+  setting: string;
+  radiusKm: string;
+};
+
+const initialFilters: DiscoveryFilters = {
+  q: "",
+  city: "",
+  country: "IN",
+  category: "",
+  budget: "",
+  intensity: "",
+  setting: "",
+  radiusKm: "10",
+};
+
 export function useExperiences(
   user: User | null,
   act: Action,
   setError: (message: string) => void,
   setNotice: (message: string) => void,
+  preferences: Preferences,
+  setPreferences: Dispatch<SetStateAction<Preferences>>,
 ) {
-  const [filters, setFilters] = useState({ q: "", category: "", budget: "", intensity: "" });
+  const [filters, setFilters] = useState<DiscoveryFilters>(initialFilters);
   const [experiences, setExperiences] = useState<Experience[]>([]);
-  const [eventKeyword, setEventKeyword] = useState("");
-  const [eventCity, setEventCity] = useState("");
-  const [eventCountry, setEventCountry] = useState("");
+  const [loadingPlaces, setLoadingPlaces] = useState(false);
+  const locationRequested = useRef(false);
+  const requestNumber = useRef(0);
+
+  const useCurrentLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      setError("Location is unavailable in this browser. Enter a city to find nearby places.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setPreferences((current) => ({ ...current, homeLatitude: coords.latitude, homeLongitude: coords.longitude }));
+        setNotice("Using your current location to find nearby places.");
+      },
+      () => setError("Could not get your location. Allow location access or enter a city."),
+      { enableHighAccuracy: false, timeout: 12_000, maximumAge: 60_000 },
+    );
+  }, [setError, setNotice, setPreferences]);
+
+  useEffect(() => {
+    if (!user || locationRequested.current || (preferences.homeLatitude !== null && preferences.homeLongitude !== null)) return;
+    locationRequested.current = true;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => setPreferences((current) => ({ ...current, homeLatitude: coords.latitude, homeLongitude: coords.longitude })),
+        () => setNotice("Allow location access or enter a city to find nearby places."),
+        { enableHighAccuracy: false, timeout: 12_000, maximumAge: 60_000 },
+      );
+    }
+  }, [user, preferences.homeLatitude, preferences.homeLongitude, setPreferences, setNotice]);
+
   const loadExperiences = useCallback(async () => {
     const query = new URLSearchParams();
-    if (filters.q) query.set("q", filters.q);
+    if (filters.q.trim()) query.set("keyword", filters.q.trim());
+    if (filters.city.trim()) query.set("city", filters.city.trim());
+    else if (preferences.homeLatitude !== null && preferences.homeLongitude !== null) {
+      query.set("latitude", String(preferences.homeLatitude));
+      query.set("longitude", String(preferences.homeLongitude));
+    } else if (!filters.q.trim()) {
+      setExperiences([]);
+      return;
+    }
+    if (filters.country.trim()) query.set("countryCode", filters.country.trim());
     if (filters.category) query.set("category", filters.category);
     if (filters.budget) query.set("budget", filters.budget);
     if (filters.intensity) query.set("intensity", filters.intensity);
-    const result = await api<{ experiences: Experience[] }>(`/api/experiences?${query}`);
-    setExperiences(result.experiences);
-  }, [filters]);
+    if (filters.setting) query.set("setting", filters.setting);
+    if (filters.radiusKm) query.set("radiusKm", filters.radiusKm);
+
+    const currentRequest = ++requestNumber.current;
+    setLoadingPlaces(true);
+    try {
+      const result = await api<{ experiences: Experience[] }>(`/api/events/search?${query}`);
+      if (currentRequest === requestNumber.current) setExperiences(result.experiences);
+    } catch (reason) {
+      if (currentRequest === requestNumber.current) {
+        setExperiences([]);
+        setError(reason instanceof Error ? reason.message : "Could not load nearby places");
+      }
+    } finally {
+      if (currentRequest === requestNumber.current) setLoadingPlaces(false);
+    }
+  }, [filters, preferences.homeLatitude, preferences.homeLongitude, setError]);
+
   useEffect(() => {
     if (!user) return;
-    // Debounce the catalog request while the user is changing filters.
-    const timer = window.setTimeout(
-      () =>
-        loadExperiences().catch((reason: unknown) =>
-          setError(reason instanceof Error ? reason.message : "Could not load experiences"),
-        ),
-      250,
-    );
+    const timer = window.setTimeout(() => void loadExperiences(), 350);
     return () => window.clearTimeout(timer);
-  }, [user, loadExperiences, setError]);
+  }, [user, loadExperiences]);
+
   async function searchLiveEvents(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!eventKeyword.trim() && !eventCity.trim()) {
-      setError("Enter a place keyword or city to search.");
-      return;
-    }
-    await act(async () => {
-      const query = new URLSearchParams();
-      if (eventKeyword.trim()) query.set("keyword", eventKeyword.trim());
-      if (eventCity.trim()) query.set("city", eventCity.trim());
-      if (eventCountry.trim()) query.set("countryCode", eventCountry.trim());
-      const result = await api<{ experiences: Experience[] }>(`/api/events/search?${query}`);
-      setExperiences((current) => [
-        ...result.experiences,
-        ...current.filter(
-          (activity) => !result.experiences.some((found) => found.id === activity.id),
-        ),
-      ]);
-      setNotice(
-        result.experiences.length
-          ? `Added ${result.experiences.length} place${result.experiences.length === 1 ? "" : "s"} from Geoapify.`
-          : "Geoapify returned no places for that search.",
-      );
-    });
+    await act(loadExperiences);
   }
+
   async function markTried(experienceId: string, tried: boolean) {
     await act(async () => {
       await api(`/api/experiences/${experienceId}/tried`, {
@@ -77,12 +127,8 @@ export function useExperiences(
     filters,
     setFilters,
     experiences,
-    eventKeyword,
-    setEventKeyword,
-    eventCity,
-    setEventCity,
-    eventCountry,
-    setEventCountry,
+    loadingPlaces,
+    useCurrentLocation,
     searchLiveEvents,
     markTried,
   };

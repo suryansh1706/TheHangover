@@ -28,6 +28,7 @@ export type Experience = {
   isSample: boolean;
   source: string;
   lastVerifiedAt: string | null;
+  distanceKm?: number | null;
 };
 export type GroupPreferences = {
   budgetPerPerson: number | null;

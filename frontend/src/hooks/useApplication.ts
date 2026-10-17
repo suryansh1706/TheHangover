@@ -29,7 +29,14 @@ export function useApplication() {
   const auth = useAuth(authGroupActions, action.act, action.setError, action.setNotice, setPage);
   const groups = useGroups(auth.user, action.act, action.setError, action.setNotice, setPage);
   groupActionsRef.current = { loadGroups: groups.loadGroups, clearGroups: groups.clearGroups };
-  const experiences = useExperiences(auth.user, action.act, action.setError, action.setNotice);
+  const experiences = useExperiences(
+    auth.user,
+    action.act,
+    action.setError,
+    action.setNotice,
+    auth.draftPreferences,
+    auth.setDraftPreferences,
+  );
   const [feedbackId, setFeedbackId] = useState("");
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
 

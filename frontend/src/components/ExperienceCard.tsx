@@ -39,6 +39,7 @@ export function ExperienceCard({
         </div>
         <p className="card-description">{item.description}</p>
         <div className="meta-row">
+          {item.distanceKm != null && <span>{item.distanceKm < 1 ? `${Math.round(item.distanceKm * 1000)} m away` : `${item.distanceKm.toFixed(1)} km away`}</span>}
           <span>{money(item.priceMin, item.priceMax, item.currency)}</span>
           <span>
             {item.durationMins
