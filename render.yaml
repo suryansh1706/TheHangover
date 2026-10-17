@@ -36,6 +36,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: TICKETMASTER_API_KEY
+        sync: false
       - key: SEED_SAMPLE_DATA
         value: "true"
       - key: DATABASE_URL
