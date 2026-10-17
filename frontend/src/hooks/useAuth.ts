@@ -68,23 +68,35 @@ export function useAuth(
     });
   }
 
-  async function interpretPreferences(onSuccess?: () => void) {
+  async function interpretPreferences(onSuccess?: (anyIntensity: boolean) => void) {
     const text = draftPreferences.naturalLanguage?.trim();
     if (!text) {
-      setError("Write a preference description first.");
+      setDraftPreferences((current) => ({
+        ...emptyPreferences,
+        homeLatitude: current.homeLatitude,
+        homeLongitude: current.homeLongitude,
+        naturalLanguage: null,
+      }));
+      setNotice("Preference fields cleared because the description is empty.");
       return;
     }
     await act(async () => {
-      const result = await api<{ draft: Partial<Preferences>; method: string }>(
+      const result = await api<{
+        draft: Omit<Partial<Preferences>, "maxIntensity"> & { maxIntensity?: Preferences["maxIntensity"] | null };
+        method: string;
+      }>(
         "/api/profile/preference-draft",
         { method: "POST", body: JSON.stringify({ text }) },
       );
       setDraftPreferences((current) => ({
-        ...current,
+        ...emptyPreferences,
         ...result.draft,
+        maxIntensity: result.draft.maxIntensity ?? "HIGH",
+        homeLatitude: current.homeLatitude,
+        homeLongitude: current.homeLongitude,
         naturalLanguage: current.naturalLanguage,
       }));
-      onSuccess?.();
+      onSuccess?.(result.draft.maxIntensity == null);
       setNotice(
         `Preference draft prepared with ${result.method}. Review the fields, then save when ready.`,
       );

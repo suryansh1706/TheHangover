@@ -102,7 +102,7 @@ class PreferenceDraft(BaseModel):
     accessibility: list[str] = Field(default_factory=list)
     dietaryNeeds: list[str] = Field(default_factory=list)
     setting: Literal["INDOOR", "OUTDOOR", "EITHER"] = "EITHER"
-    maxIntensity: Literal["LOW", "MODERATE", "HIGH"] = "HIGH"
+    maxIntensity: Literal["LOW", "MODERATE", "HIGH"] | None = None
 
 
 class PreferenceParseRequest(BaseModel):

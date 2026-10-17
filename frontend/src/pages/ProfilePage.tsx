@@ -17,6 +17,8 @@ export function ProfilePage() {
   } = useAppPageContext();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [locationMessage, setLocationMessage] = useState("");
+  const [anyIntensity, setAnyIntensity] = useState<boolean | null>(null);
+  const isAnyIntensity = anyIntensity ?? draftPreferences.maxIntensity === "HIGH";
 
   function useMyLocation() {
     if (!navigator.geolocation) {
@@ -70,7 +72,7 @@ export function ProfilePage() {
         <button
           type="button"
           className="button subtle"
-          onClick={() => void interpretPreferences(() => setDetailsOpen(true))}
+          onClick={() => void interpretPreferences((any) => { setDetailsOpen(true); setAnyIntensity(any); })}
           disabled={busy}
         >
           Fill in for me
@@ -169,9 +171,19 @@ export function ProfilePage() {
             <label>
               Maximum physical intensity
               <select
-                value={draftPreferences.maxIntensity}
-                onChange={(event) => setDraftPreferences((old) => ({ ...old, maxIntensity: event.target.value as Intensity }))}
+                value={isAnyIntensity ? "ANY" : draftPreferences.maxIntensity}
+                onChange={(event) =>
+                  {
+                    const isAny = event.target.value === "ANY";
+                    setAnyIntensity(isAny);
+                    setDraftPreferences((old) => ({
+                      ...old,
+                      maxIntensity: isAny ? "HIGH" : (event.target.value as Intensity),
+                    }));
+                  }
+                }
               >
+                <option value="ANY">Any</option>
                 <option value="LOW">Low</option>
                 <option value="MODERATE">Moderate</option>
                 <option value="HIGH">High</option>

@@ -58,7 +58,7 @@ export type AppPageContextValue = {
   createInvitation: () => Promise<void>;
   saveGroupSettings: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   savePreferences: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  interpretPreferences: (onSuccess?: () => void) => Promise<void>;
+  interpretPreferences: (onSuccess?: (anyIntensity: boolean) => void) => Promise<void>;
   recommend: () => Promise<void>;
   searchLiveEvents: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   addToShortlist: (id: string) => Promise<void>;
