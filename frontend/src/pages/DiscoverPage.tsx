@@ -34,20 +34,28 @@ export function DiscoverPage() {
     vote,
     markTried,
   } = useAppPageContext();
+  const selectedGroup = groups.find((group) => group.id === groupId);
+  const centerLatitude = selectedGroup?.preferences?.homeLatitude ?? draftPreferences.homeLatitude;
+  const centerLongitude = selectedGroup?.preferences?.homeLongitude ?? draftPreferences.homeLongitude;
+  const orderedSuggestions = [...suggestions].sort((left, right) => {
+    const leftDistance = left.experience.distanceKm ?? Number.POSITIVE_INFINITY;
+    const rightDistance = right.experience.distanceKm ?? Number.POSITIVE_INFINITY;
+    return leftDistance - rightDistance;
+  });
 
   useEffect(() => {
     invalidateRecommendations();
-    if (!groupId) return;
-    const timer = window.setTimeout(() => void recommend(filters, true), 350);
+    if (!groupId || loadingPlaces) return;
+    const timer = window.setTimeout(() => void recommend(filters, true), 250);
     return () => window.clearTimeout(timer);
-  }, [filters.q, filters.category, filters.budget, filters.intensity, groupId, invalidateRecommendations, recommend]);
+  }, [experiences, filters.q, filters.category, filters.budget, filters.intensity, groupId, loadingPlaces, invalidateRecommendations, recommend]);
 
   return (
     <>
       <PageHeading
-        eyebrow="NEARBY PLACES, FOR YOUR WHOLE GROUP"
+        eyebrow="HANGOUT PICKS FOR YOUR GROUP"
         title={<>Find your next <em>hangout.</em></>}
-        description="Explore real places around you, sorted by distance. Filter by activity, location, price, and more."
+        description="Find real places your group can enjoy, starting with the closest options. A group with one member gets picks for that person."
       />
       <div className="discover-toolbar">
         <label className="select-label">
@@ -64,8 +72,8 @@ export function DiscoverPage() {
 
       <form className="place-search panel" onSubmit={searchPlaces}>
         <div>
-          <p className="eyebrow">EXPLORE NEARBY</p>
-          <p>Places are sorted nearest first. Your saved location is used automatically when available.</p>
+          <p className="eyebrow">FILTER GROUP PICKS</p>
+          <p>Search by activity or location to refresh the picks for your selected group.</p>
         </div>
         <input
           aria-label="Search activities or keywords"
@@ -122,55 +130,17 @@ export function DiscoverPage() {
         </select>
       </div>
 
-      <p className="small-note">Powered by Geoapify · OpenStreetMap data. Prices, setting, and effort appear only when listed.</p>
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">REAL PLACES AROUND YOU</p>
-          <h2>Nearby places</h2>
-        </div>
-        <span className="small-note">{loadingPlaces ? "Updating places…" : `${experiences.length} places · nearest first`}</span>
-      </div>
-      {experiences.length ? (
-        <div className="cards">
-          {experiences.map((item) => (
-            <ExperienceCard
-              key={item.id}
-              item={item}
-              saved={shortlistedIds.has(item.id)}
-              onSave={() => addToShortlist(item.id)}
-              onTried={() => markTried(item.id, true)}
-              onVote={(choice) => vote(item.id, choice)}
-              onFeedback={() => setFeedbackId(item.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <h3>{loadingPlaces ? "Finding places near you…" : "No nearby places to show"}</h3>
-          <p>
-            {draftPreferences.homeLatitude == null && !filters.city
-              ? "Allow location access or enter a city to find real places nearby."
-              : filters.budget
-                ? "These listings do not include verified prices, so they cannot match a price limit. Try clearing it."
-                : "Try a wider radius or clear some filters."}
-          </p>
-          <button className="button subtle" onClick={() => setFilters({ q: "", city: "", country: "IN", category: "", budget: "", intensity: "", setting: "", radiusKm: "50" })}>
-            Clear filters
-          </button>
-        </div>
-      )}
-
-      {suggestions.length > 0 && (
-        <>
+      <p className="small-note">Powered by Geoapify · OpenStreetMap data. {loadingPlaces ? "Updating places…" : "Prices, setting, and effort appear only when listed."}</p>
+      <>
           <div className="section-heading">
             <div>
               <p className="eyebrow">MATCHED TO YOUR GROUP</p>
               <h2>Group picks</h2>
             </div>
-            <span className="small-note">Balances member fit, group novelty & diversity</span>
+            <span className="small-note">{busy || loadingPlaces ? "Updating group picks…" : `${orderedSuggestions.length} picks · nearest first`}</span>
           </div>
-          <div className="cards">
-            {suggestions.map((item, index) => (
+          {orderedSuggestions.length ? <div className="cards">
+            {orderedSuggestions.map((item, index) => (
               <ExperienceCard
                 key={item.activityId}
                 item={item.experience}
@@ -186,9 +156,11 @@ export function DiscoverPage() {
                 onFeedback={() => setFeedbackId(item.activityId)}
               />
             ))}
-          </div>
-        </>
-      )}
+          </div> : <div className="empty-state">
+            <h3>{groupId ? "No group picks yet" : "Choose a group to get picks"}</h3>
+            <p>{groupId ? (centerLatitude == null || centerLongitude == null ? "Set a home location in your preferences or use a city search to find nearby places." : "Try a wider radius or clear some filters.") : "Create a group or choose one above. A group with only you will get personal picks."}</p>
+          </div>}
+      </>
     </>
   );
 }

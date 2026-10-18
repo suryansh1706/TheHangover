@@ -58,7 +58,7 @@ class RecommendationRequest(BaseModel):
     members: list[MemberPreference] = Field(min_length=1)
     groupConstraints: GroupConstraints = Field(default_factory=lambda: GroupConstraints())
     activities: list[Activity]
-    limit: int = Field(default=10, ge=1, le=50)
+    limit: int = Field(default=10, ge=1, le=500)
     modelVersion: str = "content-v1"
 
 

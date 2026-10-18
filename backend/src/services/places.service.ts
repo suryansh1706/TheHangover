@@ -267,7 +267,7 @@ export async function searchAndStorePlaces(rawQuery: unknown) {
       console.warn("Skipping invalid Geoapify place", placeId);
     }
   }
-  const rows = [...uniqueRows.values()].slice(0, 50);
+  const rows = [...uniqueRows.values()];
   for (let start = 0; start < rows.length; start += 10) {
     const chunk = rows.slice(start, start + 10);
     await Promise.all(chunk.map(({ data }) => prisma.experience.upsert({ where: { slug: data.slug }, create: data, update: data })));

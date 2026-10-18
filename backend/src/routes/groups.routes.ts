@@ -8,6 +8,13 @@ import { newToken, requireAuth, tokenDigest } from "../config/security.js";
 export const groupsRouter = Router();
 groupsRouter.use(requireAuth);
 const userId = (request: Express.Request) => (request as Express.Request & { userId: string }).userId;
+const distanceKm = (lat: number, lon: number, centerLat: number, centerLon: number) => {
+  const radians = (value: number) => value * Math.PI / 180;
+  const dLat = radians(centerLat - lat);
+  const dLon = radians(centerLon - lon);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(lat)) * Math.cos(radians(centerLat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 groupsRouter.get("/", async (request, response, next) => {
   try {
@@ -153,7 +160,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
-      limit: 20,
+      limit: 500,
       groupConstraints: {
         budgetPerPerson: group.preferences?.budgetPerPerson ?? null,
         maxDurationMins: group.preferences?.maxDurationMins ?? null,
@@ -205,7 +212,18 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     await prisma.recommendationRun.create({ data: { groupId, modelVersion: result.modelVersion, inputSnapshot: payload, resultSnapshot: result } });
     const selected = new Set(result.recommendations.map(({ activityId }) => activityId));
     const activitiesById = new Map(activities.filter((activity) => selected.has(activity.id)).map((activity) => [activity.id, activity]));
-    return response.json({ ...result, recommendations: result.recommendations.map((item) => ({ ...item, experience: activitiesById.get(item.activityId) })) });
+    const centerLatitude = group.preferences?.homeLatitude ?? group.memberships[0]?.user.preferences?.homeLatitude;
+    const centerLongitude = group.preferences?.homeLongitude ?? group.memberships[0]?.user.preferences?.homeLongitude;
+    const recommendations = result.recommendations.map((item) => {
+      const experience = activitiesById.get(item.activityId);
+      const distance = experience && centerLatitude !== null && centerLatitude !== undefined
+        && centerLongitude !== null && centerLongitude !== undefined
+        && experience.latitude !== null && experience.longitude !== null
+        ? distanceKm(experience.latitude, experience.longitude, centerLatitude, centerLongitude)
+        : null;
+      return { ...item, experience: experience ? { ...experience, distanceKm: distance } : undefined };
+    }).sort((a, b) => (a.experience?.distanceKm ?? Number.POSITIVE_INFINITY) - (b.experience?.distanceKm ?? Number.POSITIVE_INFINITY));
+    return response.json({ ...result, recommendations });
   } catch (error) { return next(error); }
 });
 
