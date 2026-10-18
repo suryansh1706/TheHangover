@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "../config/db.js";
+import { placeSearchIntent } from "./placeSearchIntent.js";
 
 const searchSchema = z.object({
   keyword: z.string().trim().max(100).optional(),
@@ -17,20 +18,6 @@ type ProviderPlace = { properties?: Record<string, unknown> };
 type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
-const keywordCategoryRules: Array<{ pattern: RegExp; categories: string[]; matchCategories?: string[] }> = [
-  {
-    pattern: /\b(cycle|cycles|cycling|bicycle|bicycles|bike|bikes|biking)\b/i,
-    categories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport", "highway.cycleway", "highway.path"],
-    matchCategories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport.cycl", "sport.bicy", "highway.cycleway", "highway.path"],
-  },
-  { pattern: /\b(mystery rooms?|escape rooms?|escape games?|puzzle rooms?)\b/i, categories: ["entertainment.escape_game"] },
-  { pattern: /\b(movie|movies|film|films|cinema|cinemas|theatre|theatres|theater|theaters)\b/i, categories: ["entertainment.cinema", "entertainment.culture"] },
-  { pattern: /\b(sport|sports|football|soccer|cricket|tennis|badminton|basketball|gym|fitness|swimming)\b/i, categories: ["sport"] },
-  { pattern: /\b(park|parks|walk|walking|garden|gardens)\b/i, categories: ["leisure.park", "leisure.garden"] },
-  { pattern: /\b(food|restaurant|restaurants|eat|dining|cafe|cafes)\b/i, categories: ["catering"] },
-  { pattern: /\b(stand\s?up|comedy|comedian|comedians)\b/i, categories: ["entertainment.culture"] },
-  { pattern: /\b(museum|museums|history|exhibition)\b/i, categories: ["entertainment.museum", "tourism"] },
-];
 const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
 let requestQueue: Promise<void> = Promise.resolve();
 let lastProviderCall = 0;
@@ -87,22 +74,19 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     }
     if (!center) return [];
 
-    const keywordRule = input.keyword
-      ? keywordCategoryRules.find(({ pattern }) => pattern.test(input.keyword!))
-      : undefined;
+    const keywordIntent = input.keyword ? placeSearchIntent(input.keyword) : undefined;
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
-    const keywordCategories = keywordRule?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
-    const requestedCategories = keywordRule
+    const keywordCategories = keywordIntent?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
+    const requestedCategories = keywordIntent?.categories.length
       ? input.category && !keywordCategories?.length
         ? input.category
-        : keywordCategories?.join(",") ?? keywordRule.categories.join(",")
+        : keywordCategories?.join(",") ?? keywordIntent.categories.join(",")
       : input.category ?? placeCategories.join(",");
     placesUrl.searchParams.set("categories", requestedCategories);
     const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
     placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
     placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
     placesUrl.searchParams.set("limit", "500");
-    if (input.keyword && !keywordRule) placesUrl.searchParams.set("name", input.keyword.replace(/\([^)]*\)/g, " ").trim());
     placesUrl.searchParams.set("apiKey", apiKey);
     const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
     const features = (payload as { features?: unknown } | null)?.features;
@@ -124,31 +108,22 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     }).sort((a, b) => a.distance - b.distance).map(({ place }) => place);
 
     if (!input.keyword) return rankedPlaces;
-    const keyword = input.keyword.toLocaleLowerCase().replace(/[\s-]/g, "");
-    const specificNameTerms = keywordRule
-      ? (input.keyword.toLocaleLowerCase().replace(/\([^)]*\)/g, " ").match(/[a-z0-9]+/g) ?? [])
-        .filter((term) => !keywordRule.pattern.test(term) && !["near", "around", "in", "at", "the", "show", "shows", "venue", "venues", "place", "places"].includes(term))
-      : [];
     const matches = rankedPlaces.flatMap((place) => {
       const name = place.properties?.name;
       const categories = place.properties?.categories;
-      const placeCategories = Array.isArray(categories)
-        ? categories.filter((category): category is string => typeof category === "string").map((category) => category.toLocaleLowerCase())
+      const placeCategoryNames = Array.isArray(categories)
+        ? categories.filter((category): category is string => typeof category === "string")
         : [];
-      if (keywordRule) {
-        const acceptedCategories = keywordRule.matchCategories ?? keywordRule.categories;
-        if (!placeCategories.some((category) => acceptedCategories.some((wanted) => category.startsWith(wanted)))) return [];
-        const searchText = `${typeof name === "string" || typeof name === "number" ? String(name) : ""} ${typeof place.properties?.formatted === "string" ? place.properties.formatted : ""}`
-          .toLocaleLowerCase().replace(/[\s-]/g, "");
-        const nameMatchCount = specificNameTerms.filter((term) => searchText.includes(term)).length;
-        return [{ place, nameMatchCount }];
-      }
-      const matchesKeyword = ((typeof name === "string" || typeof name === "number") && String(name).toLocaleLowerCase().replace(/[\s-]/g, "").includes(keyword))
-        || placeCategories.some((category) => category.replace(/[\s-]/g, "").includes(keyword));
-      return matchesKeyword ? [{ place, nameMatchCount: 0 }] : [];
+      const searchText = [typeof name === "string" || typeof name === "number" ? String(name) : "", ...placeCategoryNames, typeof place.properties?.formatted === "string" ? place.properties.formatted : ""]
+        .join(" ").toLocaleLowerCase().replace(/[\s_.-]+/g, " ");
+      const terms = keywordIntent?.terms ?? [];
+      const matchesKeyword = terms.some((term) => searchText.includes(term.replace(/[\s_.-]+/g, " ")));
+      const matchesCategory = Boolean(keywordIntent?.matchCategories.some((category) =>
+        placeCategoryNames.some((placeCategory) => placeCategory.toLocaleLowerCase().startsWith(category.toLocaleLowerCase())),
+      ));
+      return matchesKeyword || matchesCategory ? [{ place }] : [];
     });
-    return matches.sort((a, b) => b.nameMatchCount - a.nameMatchCount
-      || (finiteNumber(a.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)
+    return matches.sort((a, b) => (finiteNumber(a.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)
       - (finiteNumber(b.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)).map(({ place }) => place);
   } catch (error) {
     if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../config/db.js";
 import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
+import { placeSearchIntent } from "../services/placeSearchIntent.js";
 import { newToken, requireAuth, tokenDigest } from "../config/security.js";
 
 export const groupsRouter = Router();
@@ -152,10 +153,26 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     });
     if (!group) return response.status(404).json({ error: "Group not found" });
     const activityFilters: Prisma.ExperienceWhereInput[] = [];
-    if (filters.category) activityFilters.push({ category: { equals: filters.category, mode: "insensitive" } });
+    if (filters.category) activityFilters.push({ OR: [
+      { category: { equals: filters.category, mode: "insensitive" } },
+      { category: { startsWith: `${filters.category}.`, mode: "insensitive" } },
+    ] });
     if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
     if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
-    if (filters.q) activityFilters.push({ OR: [{ name: { contains: filters.q, mode: "insensitive" } }, { description: { contains: filters.q, mode: "insensitive" } }] });
+    if (filters.q) {
+      const intent = placeSearchIntent(filters.q);
+      activityFilters.push({
+        OR: [
+          ...intent.terms.flatMap((term) => [
+            { name: { contains: term, mode: "insensitive" as const } },
+            { description: { contains: term, mode: "insensitive" as const } },
+            { category: { contains: term, mode: "insensitive" as const } },
+          ]),
+          ...intent.matchCategories.map((category) => ({ category: { startsWith: category, mode: "insensitive" as const } })),
+          { tags: { hasSome: [...intent.terms, ...intent.matchCategories] } },
+        ],
+      });
+    }
     const activities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
     const payload = {
       groupId,
