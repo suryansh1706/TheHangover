@@ -17,6 +17,13 @@ type ProviderPlace = { properties?: Record<string, unknown> };
 type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
+const keywordCategoryRules: Array<{ pattern: RegExp; category: string; terms?: string[]; apiName?: string }> = [
+  { pattern: /\b(sport|sports|football|soccer|cricket|tennis|badminton|basketball|gym|fitness|swimming)\b/i, category: "sport" },
+  { pattern: /\b(park|parks|walk|walking|garden|gardens)\b/i, category: "leisure", terms: ["park", "garden", "walk"] },
+  { pattern: /\b(food|restaurant|restaurants|eat|dining|cafe|cafes)\b/i, category: "catering" },
+  { pattern: /\b(stand\s?up|comedy|comedian)\b/i, category: "entertainment", terms: ["standup", "stand-up", "comedy", "comedian"], apiName: "comedy" },
+  { pattern: /\b(museum|museums|history|exhibition)\b/i, category: "tourism" },
+];
 const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
 let requestQueue: Promise<void> = Promise.resolve();
 let lastProviderCall = 0;
@@ -73,11 +80,17 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     }
     if (!center) return [];
 
+    const keywordRule = input.keyword
+      ? keywordCategoryRules.find(({ pattern }) => pattern.test(input.keyword!))
+      : undefined;
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
-    placesUrl.searchParams.set("categories", input.category ?? placeCategories.join(","));
+    placesUrl.searchParams.set("categories", input.category ?? keywordRule?.category ?? placeCategories.join(","));
     placesUrl.searchParams.set("filter", `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`);
     placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
     placesUrl.searchParams.set("limit", "100");
+    if (input.keyword && (!keywordRule || keywordRule.apiName)) {
+      placesUrl.searchParams.set("name", keywordRule?.apiName ?? input.keyword);
+    }
     placesUrl.searchParams.set("apiKey", apiKey);
     const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
     const features = (payload as { features?: unknown } | null)?.features;
@@ -99,14 +112,20 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     }).sort((a, b) => a.distance - b.distance).map(({ place }) => place);
 
     if (!input.keyword) return rankedPlaces;
-    const keyword = input.keyword.toLocaleLowerCase();
+    const keyword = input.keyword.toLocaleLowerCase().replace(/[\s-]/g, "");
+    const searchTerms = keywordRule?.terms ?? [keyword];
     const matches = rankedPlaces.filter((place) => {
       const name = place.properties?.name;
       const categories = place.properties?.categories;
-      return ((typeof name === "string" || typeof name === "number") && String(name).toLocaleLowerCase().includes(keyword))
-        || (Array.isArray(categories) && categories.some((category) => typeof category === "string" && category.toLocaleLowerCase().includes(keyword)));
+      const searchable = [
+        typeof name === "string" || typeof name === "number" ? String(name) : "",
+        ...(Array.isArray(categories) ? categories.filter((category): category is string => typeof category === "string") : []),
+      ].join(" ").toLocaleLowerCase().replace(/[\s-]/g, "");
+      return searchTerms.some((term) => searchable.includes(term.replace(/[\s-]/g, "")))
+        || Boolean(keywordRule && !keywordRule.terms && place.properties?.categories && Array.isArray(place.properties.categories)
+          && place.properties.categories.some((category) => typeof category === "string" && category.toLocaleLowerCase().startsWith(keywordRule.category)));
     });
-    return matches.length ? matches : rankedPlaces;
+    return matches;
   } catch (error) {
     if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;
     throw new Error("EVENT_PROVIDER_REQUEST_FAILED", { cause: error });
@@ -129,10 +148,26 @@ function placeData(place: ProviderPlace) {
   const latitude = finiteNumber(properties.lat);
   const longitude = finiteNumber(properties.lon);
   const placeId = rawPlaceId || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${latitude ?? ""}-${longitude ?? ""}`;
+  const categoryText = categories.join(" ").toLocaleLowerCase();
+  const description = categoryText.includes("comedy")
+    ? "A comedy venue for stand-up shows and live laughs."
+    : categoryText.includes("park") || categoryText.includes("garden")
+      ? "A green park for peaceful walks and outdoor time."
+      : categoryText.includes("sport") || categoryText.includes("stadium")
+        ? "A sports venue for games, training, and matches."
+        : categoryText.includes("museum") || categoryText.includes("historic")
+          ? "A museum for local history, culture, and exhibits."
+          : categoryText.includes("catering") || categoryText.includes("restaurant") || categoryText.includes("cafe")
+            ? "A place to enjoy meals, snacks, and drinks."
+            : categoryText.includes("entertainment")
+              ? "A local entertainment venue for live shows and gatherings."
+              : categoryText.includes("tourism") || categoryText.includes("attraction")
+                ? "A local attraction for sightseeing and memorable visits."
+                : "A nearby place for local activities and visits.";
   return {
     slug: `geoapify-${placeId}`,
     name,
-    description: `${name} is listed on OpenStreetMap. Check the listing for current details.`,
+    description,
     category: categories[0] ?? "Place",
     tags: categories,
     priceMin: null,
