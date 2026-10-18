@@ -9,32 +9,21 @@ const searchSchema = z.object({
   longitude: z.coerce.number().min(-180).max(180).optional(),
   radiusKm: z.coerce.number().min(1).max(100).default(10),
   category: z.enum(["entertainment", "leisure", "catering", "sport", "tourism"]).optional(),
-  budget: z.coerce.number().int().min(0).optional(),
-  setting: z.enum(["INDOOR", "OUTDOOR"]).optional(),
-  intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
-  size: z.coerce.number().int().min(1).max(100).default(30),
 }).refine((query) => (query.latitude === undefined) === (query.longitude === undefined), "Provide latitude and longitude together")
   .refine((query) => Boolean(query.city || query.latitude !== undefined), "Provide a city or location");
 
 type Search = z.infer<typeof searchSchema>;
-type ProviderPlace = {
-  properties?: {
-    place_id?: string;
-    name?: string;
-    categories?: string[];
-    formatted?: string;
-    website?: string;
-    lat?: number;
-    lon?: number;
-    distanceKm?: number;
-  };
-};
-
-export interface EventSearchProvider {
-  search(input: Search): Promise<ProviderPlace[]>;
-}
+type ProviderPlace = { properties?: Record<string, unknown> };
+type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
+const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
+let requestQueue: Promise<void> = Promise.resolve();
+let lastProviderCall = 0;
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 
 function distanceKm(latitude: number, longitude: number, centerLatitude: number, centerLongitude: number) {
   const radians = (degrees: number) => degrees * Math.PI / 180;
@@ -45,91 +34,101 @@ function distanceKm(latitude: number, longitude: number, centerLatitude: number,
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-class GeoapifyProvider implements EventSearchProvider {
-  async search(input: Search): Promise<ProviderPlace[]> {
-    const apiKey = process.env.GEOAPIFY_API_KEY;
-    if (!apiKey) throw new Error("EVENT_PROVIDER_NOT_CONFIGURED");
+function providerPlace(value: unknown): value is ProviderPlace {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
+async function fetchGeoapify(url: URL): Promise<Response> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
+    return response;
+  } catch {
+    throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
+  }
+}
+
+async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
+  const apiKey = process.env.GEOAPIFY_API_KEY;
+  if (!apiKey) throw new Error("EVENT_PROVIDER_NOT_CONFIGURED");
+
+  try {
     let center: { lat: number; lon: number } | undefined;
     if (input.city) {
-      const location = input.city;
       const geocodeUrl = new URL("https://api.geoapify.com/v1/geocode/search");
-      geocodeUrl.searchParams.set("text", location);
+      geocodeUrl.searchParams.set("text", input.city);
       geocodeUrl.searchParams.set("format", "json");
       geocodeUrl.searchParams.set("type", "city");
       geocodeUrl.searchParams.set("limit", "1");
       geocodeUrl.searchParams.set("filter", `countrycode:${(input.countryCode ?? "IN").toLowerCase()}`);
       geocodeUrl.searchParams.set("apiKey", apiKey);
-      const geocodeResponse = await fetch(geocodeUrl, { signal: AbortSignal.timeout(10_000) });
-      if (!geocodeResponse.ok) throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
-      const geocodePayload: unknown = await geocodeResponse.json();
-      const result = (geocodePayload as { results?: Array<{ lat?: number; lon?: number }> } | null)?.results?.[0];
-      if (!result || !Number.isFinite(result.lat) || !Number.isFinite(result.lon))
-        throw new Error("EVENT_LOCATION_NOT_FOUND");
-      center = { lat: result.lat!, lon: result.lon! };
-      console.warn("[Geoapify] Geocoded center", { city: location, lat: center.lat, lon: center.lon });
+      const geocodePayload: unknown = await (await fetchGeoapify(geocodeUrl)).json();
+      const result = (geocodePayload as { results?: Array<{ lat?: unknown; lon?: unknown }> } | null)?.results?.[0];
+      const lat = finiteNumber(result?.lat);
+      const lon = finiteNumber(result?.lon);
+      if (lat === null || lon === null) throw new Error("EVENT_LOCATION_NOT_FOUND");
+      center = { lat, lon };
     } else if (input.latitude !== undefined && input.longitude !== undefined) {
       center = { lat: input.latitude, lon: input.longitude };
     }
     if (!center) return [];
 
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
-    const categories = input.category ? [input.category] : placeCategories;
-    placesUrl.searchParams.set("categories", categories.join(","));
+    placesUrl.searchParams.set("categories", input.category ?? placeCategories.join(","));
     placesUrl.searchParams.set("filter", `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`);
     placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
     placesUrl.searchParams.set("limit", "100");
     placesUrl.searchParams.set("apiKey", apiKey);
-    const safePlacesUrl = new URL(placesUrl);
-    safePlacesUrl.searchParams.delete("apiKey");
-    console.warn("[Geoapify] Places request URL", safePlacesUrl.toString());
+    const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
+    const features = (payload as { features?: unknown } | null)?.features;
+    const places = Array.isArray(features) ? features.filter(providerPlace) : [];
+    const rankedPlaces = places.map((place) => {
+      const latitude = finiteNumber(place.properties?.lat);
+      const longitude = finiteNumber(place.properties?.lon);
+      const distance = latitude === null || longitude === null
+        ? Number.POSITIVE_INFINITY
+        : distanceKm(latitude, longitude, center!.lat, center!.lon);
+      const properties: Record<string, unknown> = {
+        ...(place.properties ?? {}),
+        distanceKm: Number.isFinite(distance) ? distance : undefined,
+      };
+      return {
+        place: { ...place, properties },
+        distance,
+      };
+    }).sort((a, b) => a.distance - b.distance).map(({ place }) => place);
 
-    const placesResponse = await fetch(placesUrl, { signal: AbortSignal.timeout(10_000) });
-    if (!placesResponse.ok) throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
-    const placesPayload: unknown = await placesResponse.json();
-    const features = (placesPayload as { features?: ProviderPlace[] } | null)?.features;
-    const results = Array.isArray(features) ? features : [];
-    console.warn("[Geoapify] Places feature count", results.length);
-    const centerLat = center.lat;
-    const centerLon = center.lon;
-    const rankedResults = results
-      .map((place) => {
-        const latitude = place.properties?.lat;
-        const longitude = place.properties?.lon;
-        const distance = Number.isFinite(latitude) && Number.isFinite(longitude)
-          ? distanceKm(latitude!, longitude!, centerLat, centerLon)
-          : Number.POSITIVE_INFINITY;
-        return { place: { ...place, properties: { ...place.properties, distanceKm: Number.isFinite(distance) ? distance : undefined } }, distance };
-      })
-      .sort((a, b) => a.distance - b.distance)
-      .map(({ place }) => place);
-    if (!input.keyword) return rankedResults;
-
+    if (!input.keyword) return rankedPlaces;
     const keyword = input.keyword.toLocaleLowerCase();
-    const matchingResults = rankedResults.filter((place) => {
-      const properties = place.properties;
-      return properties?.name?.toLocaleLowerCase().includes(keyword)
-        || properties?.categories?.some((value) => value.toLocaleLowerCase().includes(keyword));
+    const matches = rankedPlaces.filter((place) => {
+      const name = place.properties?.name;
+      const categories = place.properties?.categories;
+      return ((typeof name === "string" || typeof name === "number") && String(name).toLocaleLowerCase().includes(keyword))
+        || (Array.isArray(categories) && categories.some((category) => typeof category === "string" && category.toLocaleLowerCase().includes(keyword)));
     });
-    return matchingResults.length ? matchingResults : rankedResults;
+    return matches.length ? matches : rankedPlaces;
+  } catch (error) {
+    if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;
+    throw new Error("EVENT_PROVIDER_REQUEST_FAILED", { cause: error });
   }
 }
 
-const provider: EventSearchProvider = new GeoapifyProvider();
-let providerQueue = Promise.resolve();
-let lastProviderCall = 0;
-type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
-const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
-
 function placeData(place: ProviderPlace) {
-  const properties = place.properties;
-  const name = properties?.name?.trim();
+  const properties = place.properties ?? {};
+  const rawName = properties.name;
+  if (typeof rawName !== "string" && typeof rawName !== "number") return null;
+  const name = String(rawName).trim();
   if (!name) return null;
 
-  const categories = properties?.categories ?? [];
-  const latitude = properties?.lat;
-  const longitude = properties?.lon;
-  const placeId = properties?.place_id ?? `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${latitude ?? ""}-${longitude ?? ""}`;
+  const categories = Array.isArray(properties.categories)
+    ? properties.categories.filter((category): category is string => typeof category === "string").map((category) => category.trim()).filter(Boolean)
+    : [];
+  const formatted = typeof properties.formatted === "string" ? properties.formatted : null;
+  const website = typeof properties.website === "string" ? properties.website : null;
+  const rawPlaceId = typeof properties.place_id === "string" ? properties.place_id.trim() : "";
+  const latitude = finiteNumber(properties.lat);
+  const longitude = finiteNumber(properties.lon);
+  const placeId = rawPlaceId || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${latitude ?? ""}-${longitude ?? ""}`;
   return {
     slug: `geoapify-${placeId}`,
     name,
@@ -139,17 +138,17 @@ function placeData(place: ProviderPlace) {
     priceMin: null,
     priceMax: null,
     currency: null,
-    locationName: properties?.formatted ?? null,
-    latitude: Number.isFinite(latitude) ? latitude : null,
-    longitude: Number.isFinite(longitude) ? longitude : null,
+    locationName: formatted,
+    latitude,
+    longitude,
     durationMins: null,
     setting: null,
     intensity: null,
     socialLevel: null,
     adventureLevel: null,
     source: "Geoapify (OpenStreetMap)",
-    sourceUrl: properties?.website ?? null,
-    bookingUrl: properties?.website ?? null,
+    sourceUrl: website,
+    bookingUrl: website,
     eventStartsAt: null,
     eventLocalDate: null,
     eventLocalTime: null,
@@ -160,52 +159,79 @@ function placeData(place: ProviderPlace) {
   };
 }
 
-export async function searchAndStoreEvents(rawQuery: unknown) {
+async function searchWithRateLimit(input: Search) {
+  let release!: () => void;
+  const previous = requestQueue;
+  requestQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    const waitMs = Math.max(0, 250 - (Date.now() - lastProviderCall));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    lastProviderCall = Date.now();
+    return await searchGeoapifyPlaces(input);
+  } finally {
+    release();
+  }
+}
+
+export async function searchAndStorePlaces(rawQuery: unknown) {
   const query = searchSchema.parse(rawQuery);
   const cacheKey = JSON.stringify(query);
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.records;
-  let release!: () => void;
-  const next = new Promise<void>((resolve) => { release = resolve; });
-  const previous = providerQueue;
-  providerQueue = next;
-  await previous;
-  const delay = Math.max(0, 250 - (Date.now() - lastProviderCall));
-  if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+  if (cached) cache.delete(cacheKey);
+
   let places: ProviderPlace[];
   try {
-    places = await provider.search(query);
-    lastProviderCall = Date.now();
-  } finally { release(); }
-  const rows = places.map((place) => {
-    const data = placeData(place);
-    return data ? { data, distanceKm: place.properties?.distanceKm ?? null } : null;
-  }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  console.warn("[Geoapify] Named places ready to upsert", rows.length);
-  await Promise.all(rows.map(({ data }) => prisma.experience.upsert({ where: { slug: data.slug }, create: data, update: data })));
+    places = await searchWithRateLimit(query);
+  } catch (error) {
+    console.error("Geoapify place search failed", error instanceof Error ? error.message : "Unknown error");
+    throw error;
+  }
+
+  const uniqueRows = new Map<string, { data: NonNullable<ReturnType<typeof placeData>>; distanceKm: number | null }>();
+  for (const place of places) {
+    const rawPlaceId = place.properties?.place_id;
+    const placeId = typeof rawPlaceId === "string" || typeof rawPlaceId === "number" ? rawPlaceId : "unknown";
+    try {
+      const data = placeData(place);
+      if (!data) {
+        console.warn("Skipping invalid Geoapify place", placeId);
+        continue;
+      }
+      if (!uniqueRows.has(data.slug)) {
+        uniqueRows.set(data.slug, {
+          data,
+          distanceKm: finiteNumber(place.properties?.distanceKm),
+        });
+      }
+    } catch {
+      console.warn("Skipping invalid Geoapify place", placeId);
+    }
+  }
+  const rows = [...uniqueRows.values()].slice(0, 50);
+  for (let start = 0; start < rows.length; start += 10) {
+    const chunk = rows.slice(start, start + 10);
+    await Promise.all(chunk.map(({ data }) => prisma.experience.upsert({ where: { slug: data.slug }, create: data, update: data })));
+  }
+
   const found = rows.length
     ? await prisma.experience.findMany({ where: { slug: { in: rows.map(({ data }) => data.slug) } } })
     : [];
   const recordsBySlug = new Map(found.map((record) => [record.slug, record]));
-  let records = rows.flatMap(({ data, distanceKm }) => {
+  const records = rows.flatMap(({ data, distanceKm }) => {
     const record = recordsBySlug.get(data.slug);
     return record ? [{ ...record, distanceKm }] : [];
   });
-  if (query.budget !== undefined) records = records.filter((record) => record.priceMax !== null && record.currency === "INR" && record.priceMax <= query.budget!);
-  if (query.setting) records = records.filter((record) => record.setting === query.setting || record.setting === "EITHER");
-  if (query.intensity) records = records.filter((record) => record.intensity === query.intensity);
-  console.warn("[Geoapify] Places returned after upsert", records.length);
-  // Empty searches should not hide newly available provider results for the full cache window.
-  if (records.length > 0) cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records });
-  if (cache.size > 500) {
-    const now = Date.now();
-    for (const [key, value] of cache) if (value.expiresAt <= now) cache.delete(key);
-    while (cache.size > 500) cache.delete(cache.keys().next().value!);
+  if (records.length > 0) {
+    cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records });
+    for (const [key, value] of cache) if (value.expiresAt <= Date.now()) cache.delete(key);
+    if (cache.size > 500) cache.delete(cache.keys().next().value!);
   }
   return records;
 }
 
-export function eventSearchErrorCode(error: unknown) {
+export function placeSearchErrorCode(error: unknown) {
   if (error instanceof Error && error.message === "EVENT_PROVIDER_NOT_CONFIGURED") return "NOT_CONFIGURED";
   if (error instanceof Error && error.message === "EVENT_PROVIDER_REQUEST_FAILED") return "UPSTREAM_FAILED";
   if (error instanceof Error && error.message === "EVENT_LOCATION_NOT_FOUND") return "LOCATION_NOT_FOUND";

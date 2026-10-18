@@ -29,7 +29,7 @@ export function DiscoverPage() {
     setFeedbackId,
     shortlistedIds,
     recommend,
-    searchLiveEvents,
+    searchPlaces,
     addToShortlist,
     vote,
     markTried,
@@ -62,7 +62,7 @@ export function DiscoverPage() {
         </button>
       </div>
 
-      <form className="event-search panel" onSubmit={searchLiveEvents}>
+      <form className="place-search panel" onSubmit={searchPlaces}>
         <div>
           <p className="eyebrow">EXPLORE NEARBY</p>
           <p>Places are sorted nearest first. Your saved location is used automatically when available.</p>

@@ -8,7 +8,7 @@ import { groupsRouter } from "./routes/groups.routes.js";
 import { experiencesRouter } from "./routes/experiences.routes.js";
 import { profilesRouter } from "./routes/profiles.routes.js";
 import { outingsRouter } from "./routes/feedback.routes.js";
-import { eventsRouter } from "./routes/events.routes.js";
+import { placesRouter } from "./routes/places.routes.js";
 import { analyticsRouter } from "./routes/analytics.routes.js";
 
 const env = z.object({
@@ -31,7 +31,7 @@ app.use("/api/groups", groupsRouter);
 app.use("/api/experiences", experiencesRouter);
 app.use("/api/profile", profilesRouter);
 app.use("/api", outingsRouter);
-app.use("/api/events", eventsRouter);
+app.use("/api/places", placesRouter);
 app.use("/api/analytics", analyticsRouter);
 
 app.use((request, response) => {

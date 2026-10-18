@@ -18,4 +18,12 @@ describe("private API routes", () => {
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ error: "Authentication required" });
   });
+
+  it("exposes authenticated place search at the places route", async () => {
+    const response = await request(app).get("/api/places/search?city=Delhi&countryCode=IN");
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({ error: "Authentication required" });
+  });
+
 });

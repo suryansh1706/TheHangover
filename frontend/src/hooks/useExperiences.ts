@@ -87,7 +87,7 @@ export function useExperiences(
     const currentRequest = ++requestNumber.current;
     setLoadingPlaces(true);
     try {
-      const result = await api<{ experiences: Experience[] }>(`/api/events/search?${query}`);
+      const result = await api<{ experiences: Experience[] }>(`/api/places/search?${query}`);
       if (currentRequest === requestNumber.current) setExperiences(result.experiences);
     } catch (reason) {
       if (currentRequest === requestNumber.current) {
@@ -105,7 +105,7 @@ export function useExperiences(
     return () => window.clearTimeout(timer);
   }, [user, loadExperiences]);
 
-  async function searchLiveEvents(event: FormEvent<HTMLFormElement>) {
+  async function searchPlaces(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await act(loadExperiences);
   }
@@ -129,7 +129,7 @@ export function useExperiences(
     experiences,
     loadingPlaces,
     useCurrentLocation,
-    searchLiveEvents,
+    searchPlaces,
     markTried,
   };
 }

@@ -57,7 +57,7 @@ export type AppPageContextValue = {
   savePreferences: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   interpretPreferences: (onSuccess?: (anyIntensity: boolean) => void) => Promise<void>;
   recommend: (filters?: DiscoveryFilters, silent?: boolean) => Promise<void>;
-  searchLiveEvents: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  searchPlaces: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   addToShortlist: (id: string) => Promise<void>;
   vote: (id: string, choice: VoteChoice) => Promise<void>;
   refreshGroup: () => Promise<void>;
