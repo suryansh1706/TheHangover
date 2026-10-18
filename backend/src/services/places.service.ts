@@ -75,22 +75,43 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     if (!center) return [];
 
     const keywordIntent = input.keyword ? placeSearchIntent(input.keyword) : undefined;
-    const placesUrl = new URL("https://api.geoapify.com/v2/places");
     const keywordCategories = keywordIntent?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
-    const requestedCategories = keywordIntent?.categories.length
-      ? input.category && !keywordCategories?.length
-        ? input.category
-        : keywordCategories?.join(",") ?? keywordIntent.categories.join(",")
-      : input.category ?? placeCategories.join(",");
-    placesUrl.searchParams.set("categories", requestedCategories);
     const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
-    placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
-    placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-    placesUrl.searchParams.set("limit", "500");
-    placesUrl.searchParams.set("apiKey", apiKey);
-    const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
-    const features = (payload as { features?: unknown } | null)?.features;
-    const places = Array.isArray(features) ? features.filter(providerPlace) : [];
+    const categoryQueries = new Set<string>();
+    if (keywordIntent?.categories.length) {
+      if (keywordCategories?.length) categoryQueries.add(keywordCategories.join(","));
+      const broadCategories = input.category
+        ? input.category
+        : [...new Set(keywordIntent.categories.map((category) => category.split(".")[0]))].join(",");
+      if (broadCategories) categoryQueries.add(broadCategories);
+    } else {
+      categoryQueries.add(input.category ?? placeCategories.join(","));
+    }
+    const placeBatches = await Promise.all([...categoryQueries].map(async (categories) => {
+      const batch: ProviderPlace[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const placesUrl = new URL("https://api.geoapify.com/v2/places");
+        placesUrl.searchParams.set("categories", categories);
+        placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
+        placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
+        placesUrl.searchParams.set("limit", "500");
+        placesUrl.searchParams.set("offset", String(offset));
+        placesUrl.searchParams.set("apiKey", apiKey);
+        const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
+        const features = (payload as { features?: unknown } | null)?.features;
+        const page = Array.isArray(features) ? features.filter(providerPlace) : [];
+        batch.push(...page);
+        if (page.length < 500) break;
+      }
+      return batch;
+    }));
+    const uniquePlaces = new Map<string, ProviderPlace>();
+    for (const place of placeBatches.flat()) {
+      const placeId = place.properties?.place_id;
+      const key = typeof placeId === "string" ? placeId : JSON.stringify(place.properties ?? place);
+      if (!uniquePlaces.has(key)) uniquePlaces.set(key, place);
+    }
+    const places = [...uniquePlaces.values()];
     const rankedPlaces = places.map((place) => {
       const latitude = finiteNumber(place.properties?.lat);
       const longitude = finiteNumber(place.properties?.lon);

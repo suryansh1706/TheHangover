@@ -20,7 +20,7 @@ export const app = express();
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
-app.use(express.json({ limit: "32kb" }));
+app.use(express.json({ limit: "1mb" }));
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-7", legacyHeaders: false }));
 
 app.get("/health", (_request, response) => {

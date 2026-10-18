@@ -111,7 +111,7 @@ export function useGroups(
     recommendationRequest.current += 1;
     setSuggestions([]);
   }, []);
-  const recommend = useCallback(async (filters?: DiscoveryFilters, silent = false) => {
+  const recommend = useCallback(async (filters?: DiscoveryFilters, silent = false, experienceIds: string[] = []) => {
     if (!groupId) {
       setError("Create a group or join one to get group recommendations.");
       return;
@@ -119,15 +119,19 @@ export function useGroups(
     const requestId = ++recommendationRequest.current;
     setSuggestions([]);
     await act(async () => {
-      const query = new URLSearchParams();
-      if (filters?.q.trim()) query.set("q", filters.q.trim());
-      if (filters?.category) query.set("category", filters.category);
-      if (filters?.budget) query.set("budget", filters.budget);
-      if (filters?.intensity) query.set("intensity", filters.intensity);
       const result = await api<{
         recommendations: Suggestion[];
         enjoymentModelVersion: string | null;
-      }>(`/api/groups/${groupId}/recommendations?${query}`);
+      }>(`/api/groups/${groupId}/recommendations`, {
+        method: "POST",
+        body: JSON.stringify({
+          q: filters?.q.trim() || undefined,
+          category: filters?.category || undefined,
+          budget: filters?.budget || undefined,
+          intensity: filters?.intensity || undefined,
+          experienceIds,
+        }),
+      });
       if (requestId !== recommendationRequest.current) return;
       setSuggestions(result.recommendations);
       setEnjoymentModelVersion(result.enjoymentModelVersion);

@@ -5,11 +5,11 @@ export type PlaceSearchIntent = {
 };
 
 const intents: Array<{ pattern: RegExp; terms: string[]; categories: string[] }> = [
-  { pattern: /\b(cycl(?:e|es|ing)|bicycl(?:e|es)|bik(?:e|es|ing))\b/i, terms: ["cycle", "cycling", "bicycle", "bike", "biking"], categories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport.cycl", "sport.bicy", "highway.cycleway", "highway.path"] },
-  { pattern: /\b(mystery\s*rooms?|escape\s*rooms?|escape\s*games?|puzzle\s*rooms?)\b/i, terms: ["mystery room", "escape room", "escape game", "puzzle room", "escape", "puzzle"], categories: ["entertainment.escape_game", "leisure.escape_game"] },
+  { pattern: /\b(cycl(?:e|es|ing)|bicycl(?:e|es)|bik(?:e|es|ing))\b/i, terms: ["cycle", "cycling", "bicycle", "bike", "biking"], categories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport", "highway.cycleway", "highway.path"] },
+  { pattern: /\b(mystery\s*rooms?|escape\s*rooms?|escape\s*games?|puzzle\s*rooms?)\b/i, terms: ["mystery room", "escape room", "escape game", "puzzle room", "escape", "puzzle"], categories: ["entertainment.escape_game", "leisure"] },
   { pattern: /\b(movie|movies|film|films|cinema|cinemas|theatre|theatres|theater|theaters)\b/i, terms: ["movie", "film", "cinema", "theatre", "theater"], categories: ["entertainment.cinema", "entertainment.culture"] },
   { pattern: /\b(sport|sports|football|soccer|cricket|tennis|badminton|basketball|gym|fitness|swimming)\b/i, terms: ["sport", "football", "soccer", "cricket", "tennis", "badminton", "basketball", "gym", "fitness", "swimming"], categories: ["sport"] },
-  { pattern: /\b(park|parks|walk|walking|garden|gardens|nature|hike|hiking|trail|trails)\b/i, terms: ["park", "garden", "nature", "walk", "hike", "trail"], categories: ["leisure.park", "leisure.garden", "leisure.nature"] },
+  { pattern: /\b(park|parks|walk|walking|garden|gardens|nature|hike|hiking|trail|trails)\b/i, terms: ["park", "garden", "nature", "walk", "hike", "trail"], categories: ["leisure.park", "leisure.park.garden", "leisure.park.nature_reserve"] },
   { pattern: /\b(food|restaurant|restaurants|eat|dining|cafe|cafes|coffee|bakery|bakeries)\b/i, terms: ["food", "restaurant", "dining", "cafe", "coffee", "bakery"], categories: ["catering"] },
   { pattern: /\b(stand\s?up|comedy|comedian|comedians|improv)\b/i, terms: ["stand up", "comedy", "comedian", "improv"], categories: ["entertainment.culture"] },
   { pattern: /\b(museum|museums|history|exhibition|gallery|galleries|art)\b/i, terms: ["museum", "history", "exhibition", "gallery", "art"], categories: ["entertainment.museum", "entertainment.culture", "tourism"] },

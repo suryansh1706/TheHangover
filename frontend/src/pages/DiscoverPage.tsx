@@ -46,7 +46,7 @@ export function DiscoverPage() {
   useEffect(() => {
     invalidateRecommendations();
     if (!groupId || loadingPlaces) return;
-    const timer = window.setTimeout(() => void recommend(filters, true), 250);
+    const timer = window.setTimeout(() => void recommend(filters, true, experiences.map(({ id }) => id)), 250);
     return () => window.clearTimeout(timer);
   }, [experiences, filters.q, filters.category, filters.budget, filters.intensity, groupId, loadingPlaces, invalidateRecommendations, recommend]);
 
@@ -65,7 +65,7 @@ export function DiscoverPage() {
             {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
           </select>
         </label>
-        <button className="button primary" onClick={() => void recommend(filters)} disabled={busy || !groupId}>
+        <button className="button primary" onClick={() => void recommend(filters, false, experiences.map(({ id }) => id))} disabled={busy || !groupId}>
           {busy ? "Finding ideas…" : "✦ Find group picks"}
         </button>
       </div>

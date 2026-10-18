@@ -135,7 +135,7 @@ groupsRouter.post("/:groupId/shortlist/:experienceId", async (request, response,
   } catch (error) { return next(error); }
 });
 
-groupsRouter.get("/:groupId/recommendations", async (request, response, next) => {
+groupsRouter.post("/:groupId/recommendations", async (request, response, next) => {
   try {
     const groupId = request.params.groupId;
     const filters = z.object({
@@ -143,7 +143,8 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
       budget: z.coerce.number().int().min(0).optional(),
       intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
       q: z.string().trim().max(100).optional(),
-    }).parse(request.query);
+      experienceIds: z.array(z.string().min(1).max(100)).max(10000),
+    }).parse(request.body);
     const group = await prisma.group.findFirst({
       where: { id: groupId, memberships: { some: { userId: userId(request) } } },
       include: {
@@ -157,6 +158,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
       { category: { equals: filters.category, mode: "insensitive" } },
       { category: { startsWith: `${filters.category}.`, mode: "insensitive" } },
     ] });
+    activityFilters.push({ id: { in: filters.experienceIds } });
     if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
     if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
     if (filters.q) {
@@ -167,6 +169,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
             { name: { contains: term, mode: "insensitive" as const } },
             { description: { contains: term, mode: "insensitive" as const } },
             { category: { contains: term, mode: "insensitive" as const } },
+            { locationName: { contains: term, mode: "insensitive" as const } },
           ]),
           ...intent.matchCategories.map((category) => ({ category: { startsWith: category, mode: "insensitive" as const } })),
           { tags: { hasSome: [...intent.terms, ...intent.matchCategories] } },
@@ -177,7 +180,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
-      limit: 500,
+      limit: Math.max(activities.length, 1),
       groupConstraints: {
         budgetPerPerson: group.preferences?.budgetPerPerson ?? null,
         maxDurationMins: group.preferences?.maxDurationMins ?? null,
