@@ -22,7 +22,7 @@ const initialFilters: DiscoveryFilters = {
   budget: "",
   intensity: "",
   setting: "",
-  radiusKm: "10",
+  radiusKm: "50",
 };
 
 export function useExperiences(

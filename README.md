@@ -2,7 +2,7 @@
 
 The Hangover helps friends find new activities that fit the whole group, then shortlist, compare, vote, and learn from completed outings. The repository contains a working local-first implementation across a React client, an Express API, PostgreSQL, and a separate FastAPI recommendation service.
 
-**Data honesty:** the included catalog consists of generic development concepts with clearly labeled sample prices. They are not real venue listings. Live place search is optional and uses Geoapify and OpenStreetMap data, with a source and verification time. No venue, availability, route distance, or model score is fabricated.
+**Data honesty:** Discover results are real place listings from Geoapify and OpenStreetMap, with source and verification time where available. No venue, availability, route distance, or model score is fabricated.
 
 ## Structure
 
@@ -11,7 +11,6 @@ frontend/                         React, TypeScript, Vite, React Router, Tailwin
 backend/                          Express REST API, Zod validation, Prisma
   prisma/schema.prisma            relational database schema
   prisma/migrations/              versioned PostgreSQL migration
-  prisma/seed.ts                  labeled development samples
 ml-service/                       FastAPI recommendation and model service
   app/recommender.py              group scoring, constraints, novelty, diversity
   app/model.py                    feedback model and grouped validation
@@ -36,7 +35,6 @@ docker compose up -d postgres
 npm install
 npm run db:generate --workspace backend
 npm run db:migrate --workspace backend
-npm run db:seed --workspace backend
 ```
 
 Run each service in its own terminal:
@@ -63,20 +61,19 @@ To run the packaged stack with Docker instead, put your local settings in `.env`
 
 ```powershell
 docker compose --profile app up --build -d
-docker compose exec backend npm run db:seed --workspace backend
 docker compose ps
 ```
 
-The API container applies migrations on startup. Seeding is a separate command so sample concepts are never silently added to a production database. Stop the stack with `docker compose --profile app down`; add `-v` only if you intentionally want to delete the local database and saved model volumes.
+The API container applies migrations on startup. Stop the stack with `docker compose --profile app down`; add `-v` only if you intentionally want to delete the local database and saved model volumes.
 
-Set `GEOAPIFY_API_KEY` on the backend to enable live place search; sample activity ideas still work without it. Results use Geoapify and OpenStreetMap data, whose coverage varies by location and category. The ML service downloads `all-MiniLM-L6-v2` on first recommendation use when the model host is reachable; if not, it reports and uses a TF-IDF fallback.
+Set `GEOAPIFY_API_KEY` on the backend to enable place search. Results use Geoapify and OpenStreetMap data, whose coverage varies by location and category. The ML service downloads `all-MiniLM-L6-v2` on first recommendation use when the model host is reachable; if not, it reports and uses a TF-IDF fallback.
 
 ## Main product flows
 
 1. Register or log in. Passwords are bcrypt-hashed; sessions use opaque random tokens stored only as hashes and delivered in HTTP-only cookies.
 2. Add interests, dislikes, budget, distance and origin coordinates, duration, indoor/outdoor preference, intensity, accessibility, and dietary needs in Preferences.
 3. Create a group, issue a single-use invitation token, and have friends join. Tokens expire after seven days and only their hashes are stored. Group organizers can set shared budget, duration, distance, setting, and intensity limits; those constraints apply alongside each member's preferences.
-4. Browse labeled sample ideas or search current places through Geoapify. Mark activities as tried to update group novelty.
+4. Browse nearby places through Geoapify. Mark activities as tried to update group novelty.
 5. Ask for group picks. The recommender filters hard constraints, scores each member’s fit, gives substantial weight to the lowest member score, favors activities new to more members, and diversifies the list across categories. Each result includes its scoring signals and grounded reasons.
 6. Save picks, compare listed price/duration and group vote totals, then vote yes, maybe, or no.
 7. Record a completed outing, submit enjoyment and optional dimension ratings, and update the member’s learned preference tags. If a prediction was available, it is logged with its model version and feature snapshot.
@@ -119,13 +116,12 @@ The configured checks include TypeScript/Vite builds, Vitest/Supertest tests for
 
 The root `render.yaml` defines a free demo with a static frontend, API, ML service, and managed PostgreSQL database. To deploy, connect this GitHub repository to Render and create a Blueprint from the `main` branch. The Blueprint generates the internal ML token and connects the service URLs and database URL automatically. It selects TF-IDF recommendations to stay within the free ML service memory limit; the semantic embedding model is disabled for this demo. The optional Geoapify key can be added to the backend later.
 
-After deployment, wait for the database and services to report healthy, then open the frontend's Render URL. The API applies Prisma migrations at startup and seeds the clearly labeled sample catalog because `SEED_SAMPLE_DATA` is enabled in this free demo Blueprint. Free web services sleep after 15 minutes idle, and free Postgres expires after 30 days, so treat this setup as a demo and do not store important data in it.
+After deployment, wait for the database and services to report healthy, then open the frontend's Render URL. The API applies Prisma migrations at startup. Free web services sleep after 15 minutes idle, and free Postgres expires after 30 days, so treat this setup as a demo and do not store important data in it.
 
 ## Current deployment and data limitations
 
-- PostgreSQL migrations and seed data must be applied locally before the full product flow can run.
+- PostgreSQL migrations must be applied locally before the full product flow can run.
 - Live place search requires a Geoapify API key and depends on Geoapify/OpenStreetMap coverage.
-- Sample experience prices and attributes are illustrative development data and are labeled as such in the UI.
 - Catalog items without verified location or access attributes cannot satisfy a member’s strict travel/accessibility constraint.
 - The default rate limiter and model artifact storage are single-instance development defaults; production deployment should configure trusted proxy behavior, a shared rate-limit store, and persistent private model storage.
 - No Render account credentials or production data are configured in this repository, so the Blueprint still needs to be created and reviewed in the Render dashboard.
@@ -133,4 +129,4 @@ After deployment, wait for the database and services to report healthy, then ope
 
 ## Phase status
 
-The codebase includes the foundation, authentication/profile, groups/invitations, catalog, shortlist/voting, Geoapify place search adapter, recommendation service, feedback/model evaluation, validated preference interpretation, local Docker packaging, and a free Render demo Blueprint. The production deploy step and full end-to-end verification still require a configured Render account and a successful dashboard deployment. Do not treat the repository as production-deployed until that deployment has been checked with real credentials and data.
+The codebase includes the foundation, authentication/profile, groups/invitations, catalog, shortlist/voting, Geoapify place search adapter, recommendation service, feedback/model evaluation, local Docker packaging, and a free Render demo Blueprint. The production deploy step and full end-to-end verification still require a configured Render account and a successful dashboard deployment. Do not treat the repository as production-deployed until that deployment has been checked with real credentials and data.

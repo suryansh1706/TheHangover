@@ -157,7 +157,7 @@ model Experience {
   maxGroupSize      Int?
   accessibilityFeatures String[] @default([])
   dietaryOptions    String[]  @default([])
-  source            String    @default("sample")
+  source            String    @default("unknown")
   sourceUrl         String?
   eventStartsAt     DateTime?
   eventLocalDate    String?
@@ -165,7 +165,6 @@ model Experience {
   eventTimeZone     String?
   bookingUrl        String?
   lastVerifiedAt    DateTime?
-  isSample          Boolean   @default(true)
   active            Boolean   @default(true)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

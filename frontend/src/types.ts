@@ -25,7 +25,6 @@ export type Experience = {
   intensity: string | null;
   adventureLevel: number | null;
   socialLevel: number | null;
-  isSample: boolean;
   source: string;
   lastVerifiedAt: string | null;
   distanceKm?: number | null;

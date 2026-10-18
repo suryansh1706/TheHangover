@@ -17,12 +17,19 @@ type ProviderPlace = { properties?: Record<string, unknown> };
 type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
-const keywordCategoryRules: Array<{ pattern: RegExp; category: string; terms?: string[]; apiName?: string }> = [
-  { pattern: /\b(sport|sports|football|soccer|cricket|tennis|badminton|basketball|gym|fitness|swimming)\b/i, category: "sport" },
-  { pattern: /\b(park|parks|walk|walking|garden|gardens)\b/i, category: "leisure", terms: ["park", "garden", "walk"] },
-  { pattern: /\b(food|restaurant|restaurants|eat|dining|cafe|cafes)\b/i, category: "catering" },
-  { pattern: /\b(stand\s?up|comedy|comedian)\b/i, category: "entertainment", terms: ["standup", "stand-up", "comedy", "comedian"], apiName: "comedy" },
-  { pattern: /\b(museum|museums|history|exhibition)\b/i, category: "tourism" },
+const keywordCategoryRules: Array<{ pattern: RegExp; categories: string[]; matchCategories?: string[] }> = [
+  {
+    pattern: /\b(cycle|cycles|cycling|bicycle|bicycles|bike|bikes|biking)\b/i,
+    categories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport", "highway.cycleway", "highway.path"],
+    matchCategories: ["rental.bicycle", "commercial.outdoor_and_sport.bicycle", "sport.cycl", "sport.bicy", "highway.cycleway", "highway.path"],
+  },
+  { pattern: /\b(mystery rooms?|escape rooms?|escape games?|puzzle rooms?)\b/i, categories: ["entertainment.escape_game"] },
+  { pattern: /\b(movie|movies|film|films|cinema|cinemas|theatre|theatres|theater|theaters)\b/i, categories: ["entertainment.cinema", "entertainment.culture"] },
+  { pattern: /\b(sport|sports|football|soccer|cricket|tennis|badminton|basketball|gym|fitness|swimming)\b/i, categories: ["sport"] },
+  { pattern: /\b(park|parks|walk|walking|garden|gardens)\b/i, categories: ["leisure.park", "leisure.garden"] },
+  { pattern: /\b(food|restaurant|restaurants|eat|dining|cafe|cafes)\b/i, categories: ["catering"] },
+  { pattern: /\b(stand\s?up|comedy|comedian|comedians)\b/i, categories: ["entertainment.culture"] },
+  { pattern: /\b(museum|museums|history|exhibition)\b/i, categories: ["entertainment.museum", "tourism"] },
 ];
 const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
 let requestQueue: Promise<void> = Promise.resolve();
@@ -60,7 +67,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
   if (!apiKey) throw new Error("EVENT_PROVIDER_NOT_CONFIGURED");
 
   try {
-    let center: { lat: number; lon: number } | undefined;
+    let center: { lat: number; lon: number; placeId?: string } | undefined;
     if (input.city) {
       const geocodeUrl = new URL("https://api.geoapify.com/v1/geocode/search");
       geocodeUrl.searchParams.set("text", input.city);
@@ -70,11 +77,11 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
       geocodeUrl.searchParams.set("filter", `countrycode:${(input.countryCode ?? "IN").toLowerCase()}`);
       geocodeUrl.searchParams.set("apiKey", apiKey);
       const geocodePayload: unknown = await (await fetchGeoapify(geocodeUrl)).json();
-      const result = (geocodePayload as { results?: Array<{ lat?: unknown; lon?: unknown }> } | null)?.results?.[0];
+      const result = (geocodePayload as { results?: Array<{ lat?: unknown; lon?: unknown; place_id?: unknown }> } | null)?.results?.[0];
       const lat = finiteNumber(result?.lat);
       const lon = finiteNumber(result?.lon);
       if (lat === null || lon === null) throw new Error("EVENT_LOCATION_NOT_FOUND");
-      center = { lat, lon };
+      center = { lat, lon, placeId: typeof result?.place_id === "string" ? result.place_id : undefined };
     } else if (input.latitude !== undefined && input.longitude !== undefined) {
       center = { lat: input.latitude, lon: input.longitude };
     }
@@ -84,13 +91,18 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
       ? keywordCategoryRules.find(({ pattern }) => pattern.test(input.keyword!))
       : undefined;
     const placesUrl = new URL("https://api.geoapify.com/v2/places");
-    placesUrl.searchParams.set("categories", input.category ?? keywordRule?.category ?? placeCategories.join(","));
-    placesUrl.searchParams.set("filter", `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`);
+    const keywordCategories = keywordRule?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
+    const requestedCategories = keywordRule
+      ? input.category && !keywordCategories?.length
+        ? input.category
+        : keywordCategories?.join(",") ?? keywordRule.categories.join(",")
+      : input.category ?? placeCategories.join(",");
+    placesUrl.searchParams.set("categories", requestedCategories);
+    const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
+    placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
     placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-    placesUrl.searchParams.set("limit", "100");
-    if (input.keyword && (!keywordRule || keywordRule.apiName)) {
-      placesUrl.searchParams.set("name", keywordRule?.apiName ?? input.keyword);
-    }
+    placesUrl.searchParams.set("limit", "500");
+    if (input.keyword && !keywordRule) placesUrl.searchParams.set("name", input.keyword.replace(/\([^)]*\)/g, " ").trim());
     placesUrl.searchParams.set("apiKey", apiKey);
     const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
     const features = (payload as { features?: unknown } | null)?.features;
@@ -113,19 +125,31 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
 
     if (!input.keyword) return rankedPlaces;
     const keyword = input.keyword.toLocaleLowerCase().replace(/[\s-]/g, "");
-    const searchTerms = keywordRule?.terms ?? [keyword];
-    const matches = rankedPlaces.filter((place) => {
+    const specificNameTerms = keywordRule
+      ? (input.keyword.toLocaleLowerCase().replace(/\([^)]*\)/g, " ").match(/[a-z0-9]+/g) ?? [])
+        .filter((term) => !keywordRule.pattern.test(term) && !["near", "around", "in", "at", "the", "show", "shows", "venue", "venues", "place", "places"].includes(term))
+      : [];
+    const matches = rankedPlaces.flatMap((place) => {
       const name = place.properties?.name;
       const categories = place.properties?.categories;
-      const searchable = [
-        typeof name === "string" || typeof name === "number" ? String(name) : "",
-        ...(Array.isArray(categories) ? categories.filter((category): category is string => typeof category === "string") : []),
-      ].join(" ").toLocaleLowerCase().replace(/[\s-]/g, "");
-      return searchTerms.some((term) => searchable.includes(term.replace(/[\s-]/g, "")))
-        || Boolean(keywordRule && !keywordRule.terms && place.properties?.categories && Array.isArray(place.properties.categories)
-          && place.properties.categories.some((category) => typeof category === "string" && category.toLocaleLowerCase().startsWith(keywordRule.category)));
+      const placeCategories = Array.isArray(categories)
+        ? categories.filter((category): category is string => typeof category === "string").map((category) => category.toLocaleLowerCase())
+        : [];
+      if (keywordRule) {
+        const acceptedCategories = keywordRule.matchCategories ?? keywordRule.categories;
+        if (!placeCategories.some((category) => acceptedCategories.some((wanted) => category.startsWith(wanted)))) return [];
+        const searchText = `${typeof name === "string" || typeof name === "number" ? String(name) : ""} ${typeof place.properties?.formatted === "string" ? place.properties.formatted : ""}`
+          .toLocaleLowerCase().replace(/[\s-]/g, "");
+        const nameMatchCount = specificNameTerms.filter((term) => searchText.includes(term)).length;
+        return [{ place, nameMatchCount }];
+      }
+      const matchesKeyword = ((typeof name === "string" || typeof name === "number") && String(name).toLocaleLowerCase().replace(/[\s-]/g, "").includes(keyword))
+        || placeCategories.some((category) => category.replace(/[\s-]/g, "").includes(keyword));
+      return matchesKeyword ? [{ place, nameMatchCount: 0 }] : [];
     });
-    return matches;
+    return matches.sort((a, b) => b.nameMatchCount - a.nameMatchCount
+      || (finiteNumber(a.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)
+      - (finiteNumber(b.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)).map(({ place }) => place);
   } catch (error) {
     if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;
     throw new Error("EVENT_PROVIDER_REQUEST_FAILED", { cause: error });
@@ -189,7 +213,6 @@ function placeData(place: ProviderPlace) {
     eventLocalTime: null,
     eventTimeZone: null,
     lastVerifiedAt: new Date(),
-    isSample: false,
     active: true,
   };
 }

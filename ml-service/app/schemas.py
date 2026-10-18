@@ -41,7 +41,6 @@ class Activity(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     accessibilityFeatures: list[str] = Field(default_factory=list)
     dietaryOptions: list[str] = Field(default_factory=list)
-    isSample: bool = True
 
 
 class GroupConstraints(BaseModel):

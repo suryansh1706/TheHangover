@@ -149,7 +149,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
     if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
     if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
     if (filters.q) activityFilters.push({ OR: [{ name: { contains: filters.q, mode: "insensitive" } }, { description: { contains: filters.q, mode: "insensitive" } }] });
-    const activities = await prisma.experience.findMany({ where: { active: true, isSample: false, AND: activityFilters } });
+    const activities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
@@ -185,7 +185,7 @@ groupsRouter.get("/:groupId/recommendations", async (request, response, next) =>
         id: activity.id, name: activity.name, description: activity.description, category: activity.category,
         tags: activity.tags, priceMax: activity.priceMax, setting: activity.setting, intensity: activity.intensity,
         adventureLevel: activity.adventureLevel, socialLevel: activity.socialLevel,
-        durationMins: activity.durationMins, isSample: activity.isSample,
+        durationMins: activity.durationMins,
         minGroupSize: activity.minGroupSize, maxGroupSize: activity.maxGroupSize,
         latitude: activity.latitude, longitude: activity.longitude,
         accessibilityFeatures: activity.accessibilityFeatures, dietaryOptions: activity.dietaryOptions,

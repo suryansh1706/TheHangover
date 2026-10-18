@@ -35,7 +35,6 @@ export function ExperienceCard({
       <div className="card-body">
         <div className="card-title-row">
           <h3>{item.name}</h3>
-          {item.isSample && <span className="sample-tag">SAMPLE IDEA</span>}
         </div>
         <p className="card-description">{item.description}</p>
         <div className="meta-row">
@@ -98,10 +97,8 @@ export function ExperienceCard({
             View source and booking details
           </a>
         )}
-        <p className="sample-disclaimer">
-          {item.isSample
-            ? "Development sample. Not a verified venue, price, or availability listing."
-            : `${item.source}${item.lastVerifiedAt ? ` · checked ${new Date(item.lastVerifiedAt).toLocaleDateString()}` : ""}`}
+        <p className="source-note">
+          {`${item.source}${item.lastVerifiedAt ? ` · checked ${new Date(item.lastVerifiedAt).toLocaleDateString()}` : ""}`}
         </p>
       </div>
     </article>

@@ -154,7 +154,7 @@ export function DiscoverPage() {
                 ? "These listings do not include verified prices, so they cannot match a price limit. Try clearing it."
                 : "Try a wider radius or clear some filters."}
           </p>
-          <button className="button subtle" onClick={() => setFilters({ q: "", city: "", country: "IN", category: "", budget: "", intensity: "", setting: "", radiusKm: "10" })}>
+          <button className="button subtle" onClick={() => setFilters({ q: "", city: "", country: "IN", category: "", budget: "", intensity: "", setting: "", radiusKm: "50" })}>
             Clear filters
           </button>
         </div>

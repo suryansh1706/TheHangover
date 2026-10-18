@@ -184,8 +184,6 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
             reasons.append("It matches one or more stated group interests.")
         if item["lowest"] >= 0.55:
             reasons.append("Its preference fit is reasonably balanced across members.")
-        if activity.isSample:
-            reasons.append("This is a clearly labeled development sample, not a verified venue listing.")
         chosen.append({
             "activityId": activity.id,
             "score": round(item["score"], 4),
