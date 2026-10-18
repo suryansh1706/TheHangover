@@ -12,10 +12,9 @@ export function ProfilePage() {
     profileName,
     setProfileName,
     savePreferences,
-    interpretPreferences,
     splitList,
   } = useAppPageContext();
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [locationMessage, setLocationMessage] = useState("");
   const [anyIntensity, setAnyIntensity] = useState<boolean | null>(null);
   const isAnyIntensity = anyIntensity ?? draftPreferences.maxIntensity === "HIGH";
@@ -54,33 +53,6 @@ export function ProfilePage() {
         description="Set preferences that help the group find experiences you’ll feel good about."
       />
       <form className="panel preference-form" onSubmit={savePreferences}>
-        <label className="full-field">
-          Describe what you enjoy
-          <textarea
-            rows={5}
-            maxLength={1000}
-            value={draftPreferences.naturalLanguage ?? ""}
-            onChange={(event) =>
-              setDraftPreferences((old) => ({
-                ...old,
-                naturalLanguage: event.target.value || null,
-              }))
-            }
-            placeholder="We like creative activities, relaxed social settings, and being outdoors…"
-          />
-        </label>
-        <button
-          type="button"
-          className="button subtle"
-          onClick={() => void interpretPreferences((any) => { setDetailsOpen(true); setAnyIntensity(any); })}
-          disabled={busy}
-        >
-          Fill in for me
-        </button>
-        <small>
-          We’ll suggest editable preferences from your description. Review them before saving.
-        </small>
-
         <details
           className="preference-details full-field"
           open={detailsOpen}

@@ -1,4 +1,4 @@
-from typing import Literal
+﻿from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -89,27 +89,3 @@ class TrainingRow(BaseModel):
 
 class TrainingRequest(BaseModel):
     rows: list[TrainingRow]
-
-
-class PreferenceDraft(BaseModel):
-    budgetPerPerson: int | None = Field(default=None, ge=0, le=1_000_000)
-    maxDistanceKm: float | None = Field(default=None, ge=0, le=5000)
-    maxDurationMins: int | None = Field(default=None, ge=1, le=1440)
-    preferredTypes: list[str] = Field(default_factory=list)
-    dislikedTypes: list[str] = Field(default_factory=list)
-    preferredTags: list[str] = Field(default_factory=list)
-    dislikedTags: list[str] = Field(default_factory=list)
-    accessibility: list[str] = Field(default_factory=list)
-    dietaryNeeds: list[str] = Field(default_factory=list)
-    setting: Literal["INDOOR", "OUTDOOR", "EITHER"] = "EITHER"
-    maxIntensity: Literal["LOW", "MODERATE", "HIGH"] | None = None
-
-
-class PreferenceParseRequest(BaseModel):
-    text: str = Field(min_length=3, max_length=1000)
-
-
-class PreferenceParseResponse(BaseModel):
-    draft: PreferenceDraft
-    method: str
-    needsReview: bool = True

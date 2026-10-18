@@ -1,24 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../config/db.js";
-import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
 import { requireAuth } from "../config/security.js";
 
 export const profilesRouter = Router();
 profilesRouter.use(requireAuth);
-profilesRouter.post("/preference-draft", async (request, response, next) => {
-  try {
-    const parsed = z.object({ text: z.string().trim().min(3).max(1000) }).safeParse(request.body);
-    if (!parsed.success) return response.status(400).json({ error: "Enter a short description of what your group enjoys" });
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (process.env.ML_SERVICE_TOKEN) headers["x-ml-service-token"] = process.env.ML_SERVICE_TOKEN;
-    const result = await fetch(`${mlServiceUrl()}/preferences/parse`, {
-      method: "POST", headers, body: JSON.stringify(parsed.data), signal: AbortSignal.timeout(mlServiceTimeoutMs),
-    });
-    if (!result.ok) return response.status(502).json({ error: "Could not interpret those preferences. You can enter them manually." });
-    return response.json(await result.json());
-  } catch (error) { return next(error); }
-});
 profilesRouter.patch("/me", async (request, response, next) => {
   try {
     const parsed = z.object({
