@@ -17,6 +17,7 @@ export function useGroups(
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [enjoymentModelVersion, setEnjoymentModelVersion] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState("");
+  const [inviteUrl, setInviteUrl] = useState("");
   const [newGroup, setNewGroup] = useState("");
   const [groupSettings, setGroupSettings] = useState<GroupPreferences>(emptyGroupPreferences);
   const [groupName, setGroupName] = useState("");
@@ -89,8 +90,11 @@ export function useGroups(
         `/api/groups/${groupId}/invitations`,
         { method: "POST", body: JSON.stringify({}) },
       );
+      const url = new URL("/join", window.location.origin);
+      url.searchParams.set("token", result.invitation.token);
+      setInviteUrl(url.toString());
       setNotice(
-        `Invite token: ${result.invitation.token} (expires ${new Date(result.invitation.expiresAt).toLocaleDateString()})`,
+        `Invite link ready. It expires ${new Date(result.invitation.expiresAt).toLocaleDateString()}.`,
       );
     });
   }
@@ -182,6 +186,7 @@ export function useGroups(
     enjoymentModelVersion,
     inviteToken,
     setInviteToken,
+    inviteUrl,
     newGroup,
     setNewGroup,
     groupSettings,

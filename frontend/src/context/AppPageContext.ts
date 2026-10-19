@@ -27,8 +27,10 @@ export type AppPageContextValue = {
   error: string;
   notice: string;
   setError: Dispatch<SetStateAction<string>>;
+  setNotice: Dispatch<SetStateAction<string>>;
   inviteToken: string;
   setInviteToken: Dispatch<SetStateAction<string>>;
+  inviteUrl: string;
   newGroup: string;
   setNewGroup: Dispatch<SetStateAction<string>>;
   groupSettings: GroupPreferences;

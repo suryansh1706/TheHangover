@@ -7,10 +7,11 @@ import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
 import { FeedbackModal } from "./pages/FeedbackModal";
 import { GroupPage } from "./pages/GroupPage";
+import { JoinInvitePage } from "./pages/JoinInvitePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ShortlistPage } from "./pages/ShortlistPage";
 
-const appPaths = ["/", "/group", "/shortlist", "/analytics", "/profile"] as const;
+const appPaths = ["/", "/group", "/shortlist", "/analytics", "/profile", "/join"] as const;
 
 function App() {
   const app = useApplication();
@@ -59,6 +60,7 @@ function App() {
         }
       >
         <Routes>
+          <Route path="/join" element={<JoinInvitePage />} />
           <Route path="/" element={<DiscoverPage />} />
           <Route path="/group" element={<GroupPage />} />
           <Route path="/shortlist" element={<ShortlistPage />} />

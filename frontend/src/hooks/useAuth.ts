@@ -44,7 +44,8 @@ export function useAuth(
       setProfileName(result.user.name);
       setDraftPreferences(result.user.preferences ?? emptyPreferences);
       await groupActions.loadGroups();
-      setPage(authMode === "register" ? "profile" : "discover");
+      if (window.location.pathname !== "/join")
+        setPage(authMode === "register" ? "profile" : "discover");
     });
   }
 

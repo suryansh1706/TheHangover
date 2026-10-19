@@ -1,13 +1,16 @@
+import { useState, type FormEvent } from "react";
 import { useAppPageContext } from "../hooks/useAppPageContext";
 import { PageHeading } from "../components/PageHeading";
 import type { Setting, Intensity } from "../types";
 
 export function GroupPage() {
+  const [inviteEmail, setInviteEmail] = useState("");
   const {
     groups,
     busy,
     inviteToken,
     setInviteToken,
+    inviteUrl,
     newGroup,
     setNewGroup,
     groupSettings,
@@ -21,7 +24,34 @@ export function GroupPage() {
     createInvitation,
     saveGroupSettings,
     numOrNull,
+    setNotice,
   } = useAppPageContext();
+  async function copyInviteLink() {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setNotice("Invite link copied. It can be used once before it expires.");
+    } catch {
+      setNotice("Could not copy the invite link. Select and copy it from the field.");
+    }
+  }
+  async function shareInviteLink() {
+    if (!inviteUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Join my Hangover group", text: "Join our group on The Hangover.", url: inviteUrl });
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "AbortError")) setNotice("Could not open the share menu.");
+      }
+      return;
+    }
+    await copyInviteLink();
+  }
+  function emailInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!inviteUrl || !inviteEmail) return;
+    window.location.href = `mailto:${encodeURIComponent(inviteEmail)}?subject=${encodeURIComponent(`Join ${activeGroup?.name ?? "our group"} on The Hangover`)}&body=${encodeURIComponent(`Join our group using this link: ${inviteUrl}`)}`;
+  }
   return (
     <>
       <PageHeading
@@ -83,6 +113,23 @@ export function GroupPage() {
             {activeGroup.memberships.length} member
             {activeGroup.memberships.length === 1 ? "" : "s"}. Invite tokens expire after 7 days.
           </p>
+          {inviteUrl && (
+            <div className="invite-tools">
+              <label className="full-field">
+                Group invite link
+                <input readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />
+              </label>
+              <div className="inline-form">
+                <button type="button" className="button dark" onClick={() => void copyInviteLink()}>Copy link</button>
+                <button type="button" className="button subtle" onClick={() => void shareInviteLink()}>Share link</button>
+              </div>
+              <form className="inline-form" onSubmit={emailInvite}>
+                <input type="email" required placeholder="Friend’s email address" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} />
+                <button className="button primary" type="submit">Email invite</button>
+              </form>
+              <p className="small-note">The email button opens a prefilled message in your email app. The invite link can be used once and expires in 7 days.</p>
+            </div>
+          )}
           <div className="member-list">
             {activeGroup.memberships.map((member) => (
               <div className="member" key={member.user.id}>

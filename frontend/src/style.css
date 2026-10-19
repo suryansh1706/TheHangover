@@ -606,6 +606,26 @@ button:disabled {
   font-size: 11px;
   margin: 8px 0 16px;
 }
+.invite-tools {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  max-width: 720px;
+}
+.invite-tools label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.invite-tools input {
+  min-width: 0;
+  width: 100%;
+}
+.invite-tools .small-note {
+  margin: 0;
+}
 .member-list {
   display: flex;
   flex-wrap: wrap;
