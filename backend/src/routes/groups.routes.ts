@@ -141,8 +141,14 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
       category: z.string().trim().max(60).optional(),
       budget: z.coerce.number().int().min(0).optional(),
       intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
+      duration: z.coerce.number().int().min(1).max(1440).optional(),
+      setting: z.enum(["INDOOR", "OUTDOOR"]).optional(),
       q: z.string().trim().max(100).optional(),
       experienceIds: z.array(z.string().min(1).max(100)).max(10000),
+      placeSignals: z.array(z.object({
+        id: z.string(), popularityScore: z.number().default(0), distanceKm: z.number().nullable().optional(),
+        missingFields: z.array(z.string()).default([]), matchedFilters: z.array(z.string()).default([]),
+      })).optional(),
     }).parse(request.body);
     const group = await prisma.group.findFirst({
       where: { id: groupId, memberships: { some: { userId: userId(request) } } },
@@ -154,20 +160,37 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     if (!group) return response.status(404).json({ error: "Group not found" });
     const activityFilters: Prisma.ExperienceWhereInput[] = [];
     if (filters.category) activityFilters.push({ OR: [
+      { category: "Place" },
       { category: { equals: filters.category, mode: "insensitive" } },
       { category: { startsWith: `${filters.category}.`, mode: "insensitive" } },
     ] });
     activityFilters.push({ id: { in: filters.experienceIds } });
-    if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
-    if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
+    if (filters.budget !== undefined) activityFilters.push({ OR: [
+      { priceMax: null }, { NOT: { currency: "INR" } }, { AND: [{ priceMax: { lte: filters.budget } }, { currency: "INR" }] },
+    ] });
+    if (filters.intensity) {
+      const allowedIntensities = (["LOW", "MODERATE", "HIGH"] as const).slice(0, (["LOW", "MODERATE", "HIGH"] as const).indexOf(filters.intensity) + 1);
+      activityFilters.push({ OR: [{ intensity: null }, ...allowedIntensities.map((intensity) => ({ intensity }))] });
+    }
+    if (filters.duration !== undefined) activityFilters.push({ OR: [
+      { durationMins: null }, { durationMins: { lte: filters.duration } },
+    ] });
+    if (filters.setting) activityFilters.push({ OR: [
+      { setting: null }, { setting: "EITHER" }, { setting: filters.setting },
+    ] });
     // Keyword searches already send matching Geoapify experience IDs. Applying a
     // second text match here can discard valid provider results whose category
     // labels differ from the search intent terms.
-    const activities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
+    const placeSignals = new Map((filters.placeSignals ?? []).map(({ id, ...signal }) => [id, signal]));
+    const foundActivities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
+    const activities = foundActivities.map((activity) => ({ activity, signal: placeSignals.get(activity.id) }))
+      .sort((a, b) => ((b.signal?.popularityScore ?? 0) - (b.signal?.distanceKm ?? 1000) * 0.05)
+        - ((a.signal?.popularityScore ?? 0) - (a.signal?.distanceKm ?? 1000) * 0.05))
+      .slice(0, 200).map(({ activity }) => activity);
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
-      limit: Math.min(Math.max(activities.length, 1), 10000),
+      limit: Math.min(Math.max(activities.length, 1), 10),
       groupConstraints: {
         budgetPerPerson: group.preferences?.budgetPerPerson ?? null,
         maxDurationMins: group.preferences?.maxDurationMins ?? null,
@@ -198,11 +221,13 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
       activities: activities.map((activity) => ({
         id: activity.id, name: activity.name, description: activity.description, category: activity.category,
         tags: activity.tags, priceMax: activity.priceMax, setting: activity.setting, intensity: activity.intensity,
+        currency: activity.currency,
         adventureLevel: activity.adventureLevel, socialLevel: activity.socialLevel,
         durationMins: activity.durationMins,
         minGroupSize: activity.minGroupSize, maxGroupSize: activity.maxGroupSize,
         latitude: activity.latitude, longitude: activity.longitude,
         accessibilityFeatures: activity.accessibilityFeatures, dietaryOptions: activity.dietaryOptions,
+        ...placeSignals.get(activity.id),
       })),
     };
     const headers: Record<string, string> = { "content-type": "application/json" };
@@ -220,7 +245,7 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
       });
       return response.status(502).json({ error: "Recommendation service could not score this group" });
     }
-    const result = await mlResponse.json() as { modelVersion: string; recommendations: Array<{ activityId: string }> };
+    const result = await mlResponse.json() as { modelVersion: string; recommendations: Array<{ activityId: string; missingFields?: string[]; matchedFilters?: string[] }> };
     void prisma.recommendationRun.create({ data: { groupId, modelVersion: result.modelVersion, inputSnapshot: payload, resultSnapshot: result } })
       .catch((error) => console.error("Failed to save recommendation run", error));
     const selected = new Set(result.recommendations.map(({ activityId }) => activityId));
@@ -229,13 +254,20 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     const centerLongitude = group.preferences?.homeLongitude ?? group.memberships[0]?.user.preferences?.homeLongitude;
     const recommendations = result.recommendations.map((item) => {
       const experience = activitiesById.get(item.activityId);
-      const distance = experience && centerLatitude !== null && centerLatitude !== undefined
+      const calculatedDistance = experience && centerLatitude !== null && centerLatitude !== undefined
         && centerLongitude !== null && centerLongitude !== undefined
         && experience.latitude !== null && experience.longitude !== null
         ? distanceKm(experience.latitude, experience.longitude, centerLatitude, centerLongitude)
         : null;
-      return { ...item, experience: experience ? { ...experience, distanceKm: distance } : undefined };
-    }).sort((a, b) => (a.experience?.distanceKm ?? Number.POSITIVE_INFINITY) - (b.experience?.distanceKm ?? Number.POSITIVE_INFINITY));
+      const distance = placeSignals.get(item.activityId)?.distanceKm ?? calculatedDistance;
+      return { ...item, experience: experience ? {
+        ...experience,
+        distanceKm: distance,
+        popularityScore: placeSignals.get(item.activityId)?.popularityScore ?? 0,
+        missingFields: item.missingFields ?? placeSignals.get(item.activityId)?.missingFields ?? [],
+        matchedFilters: item.matchedFilters ?? placeSignals.get(item.activityId)?.matchedFilters ?? [],
+      } : undefined };
+    });
     return response.json({ ...result, recommendations });
   } catch (error) { return next(error); }
 });

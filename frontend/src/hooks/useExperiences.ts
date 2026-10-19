@@ -12,6 +12,7 @@ export type DiscoveryFilters = {
   intensity: string;
   setting: string;
   radiusKm: string;
+  duration: string;
 };
 
 const initialFilters: DiscoveryFilters = {
@@ -23,6 +24,7 @@ const initialFilters: DiscoveryFilters = {
   intensity: "",
   setting: "",
   radiusKm: "50",
+  duration: "",
 };
 
 export function useExperiences(
@@ -36,6 +38,8 @@ export function useExperiences(
   const [filters, setFilters] = useState<DiscoveryFilters>(initialFilters);
   const [experiences, setExperiences] = useState<Experience[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
+  const [hasMorePlaces, setHasMorePlaces] = useState(false);
+  const nextOffset = useRef(0);
   const locationRequested = useRef(false);
   const requestNumber = useRef(0);
 
@@ -66,15 +70,17 @@ export function useExperiences(
     }
   }, [user, preferences.homeLatitude, preferences.homeLongitude, setPreferences, setNotice]);
 
-  const loadExperiences = useCallback(async () => {
+  const loadExperiences = useCallback(async (append = false) => {
     const query = new URLSearchParams();
     if (filters.q.trim()) query.set("keyword", filters.q.trim());
     if (filters.city.trim()) query.set("city", filters.city.trim());
     else if (preferences.homeLatitude !== null && preferences.homeLongitude !== null) {
       query.set("latitude", String(preferences.homeLatitude));
       query.set("longitude", String(preferences.homeLongitude));
-    } else if (!filters.q.trim()) {
+    } else {
       setExperiences([]);
+      setHasMorePlaces(false);
+      nextOffset.current = 0;
       return;
     }
     if (filters.country.trim()) query.set("countryCode", filters.country.trim());
@@ -82,22 +88,35 @@ export function useExperiences(
     if (filters.budget) query.set("budget", filters.budget);
     if (filters.intensity) query.set("intensity", filters.intensity);
     if (filters.setting) query.set("setting", filters.setting);
+    if (filters.duration) query.set("duration", filters.duration);
     if (filters.radiusKm) query.set("radiusKm", filters.radiusKm);
+    query.set("limit", "10");
+    query.set("offset", String(append ? nextOffset.current : 0));
 
     const currentRequest = ++requestNumber.current;
     setLoadingPlaces(true);
     try {
-      const result = await api<{ experiences: Experience[] }>(`/api/places/search?${query}`);
-      if (currentRequest === requestNumber.current) setExperiences(result.experiences);
+      const result = await api<{ experiences: Experience[]; hasMore?: boolean; nextOffset?: number | null }>(`/api/places/search?${query}`);
+      if (currentRequest === requestNumber.current) {
+        setExperiences((current) => append
+          ? [...current, ...result.experiences.filter((place) => !current.some(({ id }) => id === place.id))]
+          : result.experiences);
+        nextOffset.current = result.nextOffset ?? 0;
+        setHasMorePlaces(result.hasMore ?? false);
+      }
     } catch (reason) {
       if (currentRequest === requestNumber.current) {
         setExperiences([]);
+        setHasMorePlaces(false);
+        nextOffset.current = 0;
         setError(reason instanceof Error ? reason.message : "Could not load nearby places");
       }
     } finally {
       if (currentRequest === requestNumber.current) setLoadingPlaces(false);
     }
   }, [filters, preferences.homeLatitude, preferences.homeLongitude, setError]);
+
+  const loadMorePlaces = useCallback(async () => loadExperiences(true), [loadExperiences]);
 
   useEffect(() => {
     if (!user) return;
@@ -128,6 +147,8 @@ export function useExperiences(
     setFilters,
     experiences,
     loadingPlaces,
+    hasMorePlaces,
+    loadMorePlaces,
     useCurrentLocation,
     searchPlaces,
     markTried,

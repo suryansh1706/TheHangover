@@ -10,13 +10,24 @@ const searchSchema = z.object({
   longitude: z.coerce.number().min(-180).max(180).optional(),
   radiusKm: z.coerce.number().min(1).max(100).default(10),
   category: z.enum(["entertainment", "leisure", "catering", "sport", "tourism"]).optional(),
+  budget: z.coerce.number().int().min(0).optional(),
+  intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
+  duration: z.coerce.number().int().min(1).max(1440).optional(),
+  setting: z.enum(["INDOOR", "OUTDOOR"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).max(10000).default(0),
 }).refine((query) => (query.latitude === undefined) === (query.longitude === undefined), "Provide latitude and longitude together")
   .refine((query) => Boolean(query.city || query.latitude !== undefined), "Provide a city or location");
 
 type Search = z.infer<typeof searchSchema>;
 type ProviderPlace = { properties?: Record<string, unknown> };
-type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
+type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & {
+  distanceKm: number | null;
+  popularityScore: number;
+  missingFields: string[];
+  matchedFilters: string[];
+};
+type SearchPage = { experiences: NearbyExperience[]; hasMore: boolean; nextOffset: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
 const popularHangoutCategories = [
@@ -81,7 +92,8 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     if (!center) return [];
 
     const keywordIntent = input.keyword ? placeSearchIntent(input.keyword) : undefined;
-    const popularMode = !input.keyword && !input.category;
+    const popularMode = !input.keyword && !input.category && input.budget === undefined
+      && input.intensity === undefined && input.duration === undefined && input.setting === undefined;
     const keywordCategories = keywordIntent?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
     const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
     const categoryQueries = new Set<string>();
@@ -92,30 +104,36 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     } else {
       categoryQueries.add(popularMode ? popularHangoutCategories.join(",") : input.category ?? placeCategories.join(","));
     }
+    const candidateLimit = 200;
     const placeBatches = await Promise.all([...categoryQueries].map(async (categories) => {
       const batch: ProviderPlace[] = [];
-      for (let offset = 0; ; offset += 500) {
+      const pageSize = popularMode ? 100 : 200;
+      for (let offset = 0; offset < candidateLimit; offset += pageSize) {
         const placesUrl = new URL("https://api.geoapify.com/v2/places");
         placesUrl.searchParams.set("categories", categories);
         placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
         placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-        placesUrl.searchParams.set("limit", popularMode ? "100" : "500");
+        placesUrl.searchParams.set("limit", String(pageSize));
         if (popularMode) placesUrl.searchParams.set("conditions", "named");
-        else placesUrl.searchParams.set("offset", String(offset));
+        placesUrl.searchParams.set("offset", String(offset));
         placesUrl.searchParams.set("apiKey", apiKey);
         const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
         const features = (payload as { features?: unknown } | null)?.features;
         const page = Array.isArray(features) ? features.filter(providerPlace) : [];
         batch.push(...page);
-        if (popularMode) break;
-        if (page.length < 500) break;
+        if (page.length < pageSize) break;
       }
       return batch;
     }));
     const uniquePlaces = new Map<string, ProviderPlace>();
     for (const place of placeBatches.flat()) {
       const placeId = place.properties?.place_id;
-      const key = typeof placeId === "string" ? placeId : JSON.stringify(place.properties ?? place);
+      const name = String(place.properties?.name ?? "").trim().toLocaleLowerCase();
+      const latitude = finiteNumber(place.properties?.lat);
+      const longitude = finiteNumber(place.properties?.lon);
+      const key = typeof placeId === "string" || typeof placeId === "number"
+        ? String(placeId)
+        : `${name}|${latitude ?? ""}|${longitude ?? ""}`;
       if (!uniquePlaces.has(key)) uniquePlaces.set(key, place);
     }
     const places = [...uniquePlaces.values()];
@@ -140,17 +158,14 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         + (hasValue(properties.website) ? 3 : 0)
         + (hasValue(properties.brand) ? 2 : 0)
         + (hasValue(properties.opening_hours) ? 1 : 0)
-        + (hasValue(properties.phone) ? 1 : 0)
-        - (Number.isFinite(distance) ? distance * 0.25 : 1000);
+        + (hasValue(properties.phone) ? 1 : 0);
       return {
-        place: { ...place, properties: placeProperties },
+        place: { ...place, properties: { ...placeProperties, popularityScore: popularity } } as ProviderPlace,
         distance,
         popularity,
       };
-    }).sort((a, b) => popularMode ? b.popularity - a.popularity : a.distance - b.distance).map(({ place }) => place);
-
-    if (!input.keyword) return popularMode ? rankedPlaces.slice(0, input.limit ?? 10) : rankedPlaces;
-    const matches = rankedPlaces.flatMap((place) => {
+    });
+    const matches = rankedPlaces.flatMap(({ place, distance, popularity }) => {
       const name = place.properties?.name;
       const categories = place.properties?.categories;
       const placeCategoryNames = Array.isArray(categories)
@@ -159,14 +174,59 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
       const searchText = [typeof name === "string" || typeof name === "number" ? String(name) : "", ...placeCategoryNames, typeof place.properties?.formatted === "string" ? place.properties.formatted : ""]
         .join(" ").toLocaleLowerCase().replace(/[\s_.-]+/g, " ");
       const terms = keywordIntent?.terms ?? [];
-      const matchesKeyword = terms.some((term) => searchText.includes(term.replace(/[\s_.-]+/g, " ")));
-      const matchesCategory = Boolean(keywordIntent?.matchCategories.some((category) =>
+      const matchesKeyword = !input.keyword || terms.some((term) => searchText.includes(term.replace(/[\s_.-]+/g, " ")));
+      const matchesCategory = !input.category || !placeCategoryNames.length || placeCategoryNames.some((category) =>
+        category.toLocaleLowerCase() === input.category!.toLocaleLowerCase()
+        || category.toLocaleLowerCase().startsWith(`${input.category!.toLocaleLowerCase()}.`),
+      );
+      const keywordCategoryMatch = Boolean(keywordIntent?.matchCategories.some((category) =>
         placeCategoryNames.some((placeCategory) => placeCategory.toLocaleLowerCase().startsWith(category.toLocaleLowerCase())),
       ));
-      return matchesKeyword || matchesCategory ? [{ place }] : [];
+      if (input.keyword && !matchesKeyword && !keywordCategoryMatch) return [];
+      if (!matchesCategory) return [];
+      const latitude = finiteNumber(place.properties?.lat);
+      const longitude = finiteNumber(place.properties?.lon);
+      if (Number.isFinite(distance) && distance > input.radiusKm) return [];
+      const missingFields: string[] = [];
+      const matchedFilters: string[] = [];
+      let relevance = 0;
+      if (input.keyword) { matchedFilters.push("keyword"); relevance += matchesKeyword ? 2 : 1; }
+      if (input.category) { matchedFilters.push("category"); relevance += 1; }
+      const raw = place.properties ?? {};
+      const price = finiteNumber(raw.price_max) ?? finiteNumber(raw.price);
+      if (input.budget !== undefined) {
+        if (price === null || (raw.currency !== "INR" && raw.currency !== "INR".toLowerCase())) missingFields.push("price");
+        else if (price > input.budget) return [];
+        else { matchedFilters.push("budget"); relevance += 1; }
+      }
+      const duration = finiteNumber(raw.duration_mins) ?? finiteNumber(raw.duration);
+      if (input.duration !== undefined) {
+        if (duration === null) missingFields.push("duration");
+        else if (duration > input.duration) return [];
+        else { matchedFilters.push("duration"); relevance += 1; }
+      }
+      const intensity = typeof raw.intensity === "string" ? raw.intensity.toUpperCase() : null;
+      if (input.intensity) {
+        if (!intensity) missingFields.push("intensity");
+        else if (["LOW", "MODERATE", "HIGH"].indexOf(intensity) > ["LOW", "MODERATE", "HIGH"].indexOf(input.intensity)) return [];
+        else { matchedFilters.push("intensity"); relevance += 1; }
+      }
+      const setting = typeof raw.setting === "string" ? raw.setting.toUpperCase() : null;
+      if (input.setting) {
+        if (!setting) missingFields.push("setting");
+        else if (setting !== input.setting && setting !== "EITHER") return [];
+        else { matchedFilters.push("setting"); relevance += 1; }
+      }
+      if (input.radiusKm) {
+        if (latitude === null || longitude === null) missingFields.push("distance");
+        else { matchedFilters.push("distance"); relevance += 0.5; }
+      }
+      const proximity = Number.isFinite(distance) ? -distance * 0.05 : -20;
+      const missingPenalty = missingFields.length * 0.5;
+      const finalScore = relevance + popularity + proximity - missingPenalty;
+      return [{ place: { ...place, properties: { ...place.properties, distanceKm: Number.isFinite(distance) ? distance : undefined, popularityScore: popularity, missingFields, matchedFilters, finalScore } } as ProviderPlace, distance, finalScore }];
     });
-    return matches.sort((a, b) => (finiteNumber(a.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)
-      - (finiteNumber(b.place.properties?.distanceKm) ?? Number.POSITIVE_INFINITY)).map(({ place }) => place);
+    return matches.sort((a, b) => b.finalScore - a.finalScore).map(({ place }) => place);
   } catch (error) {
     if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;
     throw new Error("EVENT_PROVIDER_REQUEST_FAILED", { cause: error });
@@ -251,9 +311,13 @@ async function searchWithRateLimit(input: Search) {
 
 export async function searchAndStorePlaces(rawQuery: unknown) {
   const query = searchSchema.parse(rawQuery);
-  const cacheKey = JSON.stringify(query);
+  const { limit = 10, offset = 0, ...filters } = query;
+  const cacheKey = JSON.stringify(filters);
   const cached = cache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.records;
+  if (cached && cached.expiresAt > Date.now()) {
+    const experiences = cached.records.slice(offset, offset + limit);
+    return { experiences, hasMore: offset + experiences.length < cached.records.length, nextOffset: offset + experiences.length < cached.records.length ? offset + experiences.length : null } satisfies SearchPage;
+  }
   if (cached) cache.delete(cacheKey);
 
   let places: ProviderPlace[];
@@ -264,7 +328,7 @@ export async function searchAndStorePlaces(rawQuery: unknown) {
     throw error;
   }
 
-  const uniqueRows = new Map<string, { data: NonNullable<ReturnType<typeof placeData>>; distanceKm: number | null }>();
+  const uniqueRows = new Map<string, { data: NonNullable<ReturnType<typeof placeData>>; distanceKm: number | null; popularityScore: number }>();
   for (const place of places) {
     const rawPlaceId = place.properties?.place_id;
     const placeId = typeof rawPlaceId === "string" || typeof rawPlaceId === "number" ? rawPlaceId : "unknown";
@@ -278,32 +342,75 @@ export async function searchAndStorePlaces(rawQuery: unknown) {
         uniqueRows.set(data.slug, {
           data,
           distanceKm: finiteNumber(place.properties?.distanceKm),
+          popularityScore: finiteNumber(place.properties?.popularityScore) ?? 0,
         });
       }
     } catch {
       console.warn("Skipping invalid Geoapify place", placeId);
     }
   }
-  const rows = [...uniqueRows.values()].slice(0, !query.keyword && !query.category ? query.limit ?? 10 : undefined);
+  const rows = [...uniqueRows.values()];
   for (let start = 0; start < rows.length; start += 10) {
     const chunk = rows.slice(start, start + 10);
-    await Promise.all(chunk.map(({ data }) => prisma.experience.upsert({ where: { slug: data.slug }, create: data, update: data })));
+    await Promise.all(chunk.map(({ data }) => {
+      const update = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== null));
+      return prisma.experience.upsert({ where: { slug: data.slug }, create: data, update });
+    }));
   }
 
   const found = rows.length
     ? await prisma.experience.findMany({ where: { slug: { in: rows.map(({ data }) => data.slug) } } })
     : [];
   const recordsBySlug = new Map(found.map((record) => [record.slug, record]));
-  const records = rows.flatMap(({ data, distanceKm }) => {
+  const records = rows.flatMap(({ data, distanceKm, popularityScore }) => {
     const record = recordsBySlug.get(data.slug);
-    return record ? [{ ...record, distanceKm }] : [];
+    if (!record) return [];
+    const missingFields: string[] = [];
+    const matchedFilters: string[] = [];
+    let relevance = 0;
+    if (record.priceMax === null) missingFields.push("price");
+    if (record.durationMins === null) missingFields.push("duration");
+    if (record.intensity === null) missingFields.push("intensity");
+    if (record.setting === null) missingFields.push("setting");
+    if (record.category === "Place") missingFields.push("category");
+    if (distanceKm === null) missingFields.push("distance");
+    if (query.keyword) { matchedFilters.push("keyword"); relevance += 2; }
+    if (query.category) {
+      if (record.category === "Place") missingFields.push("category");
+      else if (!record.category.toLocaleLowerCase().startsWith(query.category.toLocaleLowerCase())) return [];
+      else { matchedFilters.push("category"); relevance += 1; }
+    }
+    if (query.budget !== undefined) {
+      if (record.priceMax === null || record.currency !== "INR") missingFields.push("price");
+      else if (record.priceMax > query.budget) return [];
+      else { matchedFilters.push("budget"); relevance += 1; }
+    }
+    if (query.duration !== undefined) {
+      if (record.durationMins === null) missingFields.push("duration");
+      else if (record.durationMins > query.duration) return [];
+      else { matchedFilters.push("duration"); relevance += 1; }
+    }
+    if (query.intensity) {
+      if (record.intensity === null) missingFields.push("intensity");
+      else if (["LOW", "MODERATE", "HIGH"].indexOf(record.intensity) > ["LOW", "MODERATE", "HIGH"].indexOf(query.intensity)) return [];
+      else { matchedFilters.push("intensity"); relevance += 1; }
+    }
+    if (query.setting) {
+      if (record.setting === null) missingFields.push("setting");
+      else if (record.setting !== "EITHER" && record.setting !== query.setting) return [];
+      else { matchedFilters.push("setting"); relevance += 1; }
+    }
+    const uniqueMissingFields = [...new Set(missingFields)];
+    const proximityScore = distanceKm === null ? -20 : -distanceKm * 0.05;
+    const score = relevance + popularityScore + proximityScore - uniqueMissingFields.length * 0.5;
+    return [{ ...record, distanceKm, popularityScore, missingFields: uniqueMissingFields, matchedFilters, _rankScore: score }];
   });
-  if (records.length > 0) {
-    cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records });
-    for (const [key, value] of cache) if (value.expiresAt <= Date.now()) cache.delete(key);
-    if (cache.size > 500) cache.delete(cache.keys().next().value!);
-  }
-  return records;
+  const rankedRecords = records.sort((a, b) => b._rankScore - a._rankScore).map(({ _rankScore: _score, ...record }) => record);
+  cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records: rankedRecords });
+  for (const [key, value] of cache) if (value.expiresAt <= Date.now()) cache.delete(key);
+  if (cache.size > 500) cache.delete(cache.keys().next().value!);
+  const experiences = rankedRecords.slice(offset, offset + limit);
+  return { experiences, hasMore: offset + experiences.length < rankedRecords.length, nextOffset: offset + experiences.length < rankedRecords.length ? offset + experiences.length : null } satisfies SearchPage;
 }
 
 export function placeSearchErrorCode(error: unknown) {

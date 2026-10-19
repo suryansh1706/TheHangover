@@ -36,6 +36,7 @@ export function ExperienceCard({
         <div className="card-title-row">
           <h3>{item.name}</h3>
         </div>
+        {!!item.missingFields?.length && <span className="verification-badge" title={`Unverified: ${item.missingFields.join(", ")}`}>Details unverified</span>}
         <p className="card-description">{item.description}</p>
         <div className="meta-row">
           {item.distanceKm != null && <span>{item.distanceKm < 1 ? `${Math.round(item.distanceKm * 1000)} m away` : `${item.distanceKm.toFixed(1)} km away`}</span>}

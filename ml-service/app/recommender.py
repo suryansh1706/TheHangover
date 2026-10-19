@@ -74,24 +74,20 @@ def _blocked(activity: Activity, member: MemberPreference) -> bool:
     dislikes = {item.casefold() for item in [*member.dislikedTypes, *member.dislikedTags]}
     if category in dislikes or tags.intersection(dislikes):
         return True
-    if member.budgetPerPerson is not None and (activity.currency != "INR" or activity.priceMax is None or activity.priceMax > member.budgetPerPerson):
+    if member.budgetPerPerson is not None and activity.priceMax is not None and activity.currency == "INR" and activity.priceMax > member.budgetPerPerson:
         return True
-    if member.maxDurationMins is not None and (activity.durationMins is None or activity.durationMins > member.maxDurationMins):
-        return True
-    if activity.intensity is None and member.maxIntensity != "HIGH":
+    if member.maxDurationMins is not None and activity.durationMins is not None and activity.durationMins > member.maxDurationMins:
         return True
     if activity.intensity is not None and INTENSITY[activity.intensity] > INTENSITY[member.maxIntensity]:
         return True
-    if member.setting != "EITHER" and activity.setting not in (member.setting, "EITHER"):
+    if member.setting != "EITHER" and activity.setting is not None and activity.setting not in (member.setting, "EITHER"):
         return True
-    if member.accessibility and not {value.casefold() for value in member.accessibility}.issubset({value.casefold() for value in activity.accessibilityFeatures}):
+    if member.accessibility and activity.accessibilityFeatures and not {value.casefold() for value in member.accessibility}.issubset({value.casefold() for value in activity.accessibilityFeatures}):
         return True
-    if member.dietaryNeeds and not {value.casefold() for value in member.dietaryNeeds}.issubset({value.casefold() for value in activity.dietaryOptions}):
+    if member.dietaryNeeds and activity.dietaryOptions and not {value.casefold() for value in member.dietaryNeeds}.issubset({value.casefold() for value in activity.dietaryOptions}):
         return True
     if member.maxDistanceKm is not None:
-        if member.homeLatitude is None or member.homeLongitude is None or activity.latitude is None or activity.longitude is None:
-            return True
-        if _distance_km(member.homeLatitude, member.homeLongitude, activity.latitude, activity.longitude) > member.maxDistanceKm:
+        if member.homeLatitude is not None and member.homeLongitude is not None and activity.latitude is not None and activity.longitude is not None and _distance_km(member.homeLatitude, member.homeLongitude, activity.latitude, activity.longitude) > member.maxDistanceKm:
             return True
     return False
 
@@ -105,21 +101,50 @@ def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _blocked_by_group(activity: Activity, constraints: GroupConstraints) -> bool:
-    if constraints.budgetPerPerson is not None and (activity.currency != "INR" or activity.priceMax is None or activity.priceMax > constraints.budgetPerPerson):
+    if constraints.budgetPerPerson is not None and activity.priceMax is not None and activity.currency == "INR" and activity.priceMax > constraints.budgetPerPerson:
         return True
-    if constraints.maxDurationMins is not None and (activity.durationMins is None or activity.durationMins > constraints.maxDurationMins):
+    if constraints.maxDurationMins is not None and activity.durationMins is not None and activity.durationMins > constraints.maxDurationMins:
         return True
-    if constraints.maxIntensity != "HIGH":
-        if activity.intensity is None or INTENSITY[activity.intensity] > INTENSITY[constraints.maxIntensity]:
-            return True
-    if constraints.setting != "EITHER" and activity.setting not in (constraints.setting, "EITHER"):
+    if constraints.maxIntensity != "HIGH" and activity.intensity is not None and INTENSITY[activity.intensity] > INTENSITY[constraints.maxIntensity]:
+        return True
+    if constraints.setting != "EITHER" and activity.setting is not None and activity.setting not in (constraints.setting, "EITHER"):
         return True
     if constraints.maxDistanceKm is not None:
-        if constraints.homeLatitude is None or constraints.homeLongitude is None or activity.latitude is None or activity.longitude is None:
-            return True
-        if _distance_km(constraints.homeLatitude, constraints.homeLongitude, activity.latitude, activity.longitude) > constraints.maxDistanceKm:
+        if constraints.homeLatitude is not None and constraints.homeLongitude is not None and activity.latitude is not None and activity.longitude is not None and _distance_km(constraints.homeLatitude, constraints.homeLongitude, activity.latitude, activity.longitude) > constraints.maxDistanceKm:
             return True
     return False
+
+
+def _missing_fields(activity: Activity, members: list[MemberPreference], constraints: GroupConstraints) -> set[str]:
+    missing = set(activity.missingFields)
+    if constraints.budgetPerPerson is not None and (activity.priceMax is None or activity.currency != "INR"):
+        missing.add("price")
+    if constraints.maxDurationMins is not None and activity.durationMins is None:
+        missing.add("duration")
+    if constraints.maxIntensity != "HIGH" and activity.intensity is None:
+        missing.add("intensity")
+    if constraints.setting != "EITHER" and activity.setting is None:
+        missing.add("setting")
+    if constraints.maxDistanceKm is not None and (constraints.homeLatitude is None or constraints.homeLongitude is None or activity.latitude is None or activity.longitude is None):
+        missing.add("distance")
+    for member in members:
+        if ([*member.dislikedTypes, *member.dislikedTags] and activity.category.casefold() == "place" and not activity.tags):
+            missing.add("tags")
+        if member.budgetPerPerson is not None and (activity.priceMax is None or activity.currency != "INR"):
+            missing.add("price")
+        if member.maxDurationMins is not None and activity.durationMins is None:
+            missing.add("duration")
+        if member.maxIntensity != "HIGH" and activity.intensity is None:
+            missing.add("intensity")
+        if member.setting != "EITHER" and activity.setting is None:
+            missing.add("setting")
+        if member.maxDistanceKm is not None and (member.homeLatitude is None or member.homeLongitude is None or activity.latitude is None or activity.longitude is None):
+            missing.add("distance")
+        if member.accessibility and not activity.accessibilityFeatures:
+            missing.add("accessibility")
+        if member.dietaryNeeds and not activity.dietaryOptions:
+            missing.add("dietary")
+    return missing
 
 
 def _structured(activity: Activity, member: MemberPreference) -> float:
@@ -133,6 +158,13 @@ def _structured(activity: Activity, member: MemberPreference) -> float:
 def recommend(request: RecommendationRequest) -> dict[str, Any]:
     if not request.members:
         return {"modelVersion": request.modelVersion, "textMethod": "none", "enjoymentModelVersion": None, "recommendations": []}
+    request = request.model_copy(update={
+        "activities": sorted(
+            request.activities,
+            key=lambda activity: activity.popularityScore - (activity.distanceKm if activity.distanceKm is not None else 1000) * 0.05 - len(activity.missingFields) * 0.5,
+            reverse=True,
+        )[:200],
+    })
     similarities, text_method = _similarities(request)
     enjoyment_model_version: str | None = None
     candidates: list[dict[str, Any]] = []
@@ -163,9 +195,17 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
         tried_count = sum(activity.id in member.triedIds for member in request.members)
         novelty = 1 - tried_count / len(request.members)
         group_score = 0.55 * lowest_member + 0.25 * mean_score + 0.20 * novelty
+        missing_fields = _missing_fields(activity, request.members, request.groupConstraints)
+        matched_filters = set(activity.matchedFilters)
+        if request.groupConstraints.budgetPerPerson is not None and activity.priceMax is not None and activity.currency == "INR": matched_filters.add("budget")
+        if request.groupConstraints.maxDurationMins is not None and activity.durationMins is not None: matched_filters.add("duration")
+        if request.groupConstraints.maxIntensity != "HIGH" and activity.intensity is not None: matched_filters.add("intensity")
+        if request.groupConstraints.setting != "EITHER" and activity.setting is not None: matched_filters.add("setting")
+        proximity = float(np.exp(-activity.distanceKm / 30)) if activity.distanceKm is not None else 0.0
+        final_score = group_score + 0.01 * len(matched_filters) + 0.015 * min(max(activity.popularityScore, 0), 12) + 0.15 * proximity - 0.025 * len(missing_fields)
         candidates.append({
             "activity": activity,
-            "score": group_score,
+            "score": final_score,
             "memberScores": per_member,
             "memberFeatures": member_features,
             "predictedEnjoyment": predicted_ratings,
@@ -174,6 +214,8 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
             "novelty": novelty,
             "triedCount": tried_count,
             "structured": float(np.mean(structured_scores)),
+            "missingFields": sorted(missing_fields),
+            "matchedFilters": sorted(matched_filters),
         })
 
     candidates.sort(key=lambda item: item["score"], reverse=True)
@@ -196,9 +238,11 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
             reasons.append("It matches one or more stated group interests.")
         if item["lowest"] >= 0.55:
             reasons.append("Its preference fit is reasonably balanced across members.")
+        if item["missingFields"]:
+            reasons.append("Some place details are unverified.")
         chosen.append({
             "activityId": activity.id,
-            "score": round(item["score"], 4),
+            "score": round(float(np.clip(item["score"], 0, 1)), 4),
             "memberScores": item["memberScores"],
             "memberFeatures": item["memberFeatures"],
             "predictedEnjoyment": item["predictedEnjoyment"],
@@ -210,5 +254,7 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
                 "meetsHardConstraints": True,
             },
             "reasons": reasons,
+            "missingFields": item["missingFields"],
+            "matchedFilters": item["matchedFilters"],
         })
     return {"modelVersion": request.modelVersion, "textMethod": text_method, "enjoymentModelVersion": enjoyment_model_version, "recommendations": chosen}

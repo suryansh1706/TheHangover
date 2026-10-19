@@ -606,6 +606,27 @@ button:disabled {
   font-size: 11px;
   margin: 8px 0 16px;
 }
+.nearby-results {
+  margin: 26px 0;
+}
+.nearby-results > .section-heading {
+  margin-bottom: 14px;
+}
+.load-more {
+  display: block;
+  margin: 16px auto 0;
+}
+.verification-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f3efe2;
+  color: #746344;
+  font-size: 9px;
+  letter-spacing: 0.2px;
+}
 .invite-tools {
   display: grid;
   gap: 10px;

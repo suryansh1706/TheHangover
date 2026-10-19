@@ -28,7 +28,11 @@ export type Experience = {
   source: string;
   lastVerifiedAt: string | null;
   distanceKm?: number | null;
+  popularityScore?: number;
+  missingFields?: string[];
+  matchedFilters?: string[];
 };
+export type PlaceSignal = Pick<Experience, "id" | "popularityScore" | "distanceKm" | "missingFields" | "matchedFilters">;
 export type GroupPreferences = {
   budgetPerPerson: number | null;
   maxDistanceKm: number | null;
@@ -53,6 +57,8 @@ export type Suggestion = {
   predictedEnjoyment?: Record<string, number>;
   breakdown: Record<string, number | boolean>;
   reasons: string[];
+  missingFields?: string[];
+  matchedFilters?: string[];
   experience: Experience;
 };
 export type Preferences = {

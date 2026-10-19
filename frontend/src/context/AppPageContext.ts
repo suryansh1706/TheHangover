@@ -38,6 +38,8 @@ export type AppPageContextValue = {
   groupName: string;
   setGroupName: Dispatch<SetStateAction<string>>;
   loadingPlaces: boolean;
+  hasMorePlaces: boolean;
+  loadMorePlaces: () => Promise<void>;
   useCurrentLocation: () => void;
   draftPreferences: Preferences;
   setDraftPreferences: Dispatch<SetStateAction<Preferences>>;
@@ -57,7 +59,7 @@ export type AppPageContextValue = {
   createInvitation: () => Promise<void>;
   saveGroupSettings: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   savePreferences: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  recommend: (filters?: DiscoveryFilters, silent?: boolean, experienceIds?: string[]) => Promise<void>;
+  recommend: (filters?: DiscoveryFilters, silent?: boolean, experienceIds?: string[], placeSignals?: import("../types").PlaceSignal[]) => Promise<void>;
   searchPlaces: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   addToShortlist: (id: string) => Promise<void>;
   vote: (id: string, choice: VoteChoice) => Promise<void>;

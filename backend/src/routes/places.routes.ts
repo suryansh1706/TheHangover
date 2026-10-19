@@ -6,8 +6,8 @@ import { placeSearchErrorCode, searchAndStorePlaces } from "../services/places.s
 export const placesRouter = Router();
 placesRouter.get("/search", requireAuth, async (request, response, next) => {
   try {
-    const experiences = await searchAndStorePlaces(request.query);
-    return response.json({ experiences, provider: "geoapify", verifiedAt: new Date().toISOString() });
+    const result = await searchAndStorePlaces(request.query);
+    return response.json({ ...result, provider: "geoapify", verifiedAt: new Date().toISOString() });
   } catch (error) {
     if (error instanceof z.ZodError) return response.status(400).json({ error: "Provide a city or coordinates, and check the optional country code." });
     const code = placeSearchErrorCode(error);

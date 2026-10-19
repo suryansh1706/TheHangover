@@ -29,11 +29,11 @@ class Activity(BaseModel):
     category: str
     tags: list[str] = Field(default_factory=list)
     priceMax: int | None = None
-    setting: Literal["INDOOR", "OUTDOOR", "EITHER"] | None = "EITHER"
-    intensity: Literal["LOW", "MODERATE", "HIGH"] | None = "MODERATE"
+    setting: Literal["INDOOR", "OUTDOOR", "EITHER"] | None = None
+    intensity: Literal["LOW", "MODERATE", "HIGH"] | None = None
     adventureLevel: int | None = None
     socialLevel: int | None = None
-    currency: str | None = "INR"
+    currency: str | None = None
     durationMins: int | None = None
     minGroupSize: int = 1
     maxGroupSize: int | None = None
@@ -41,6 +41,10 @@ class Activity(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     accessibilityFeatures: list[str] = Field(default_factory=list)
     dietaryOptions: list[str] = Field(default_factory=list)
+    popularityScore: float = 0
+    distanceKm: float | None = None
+    missingFields: list[str] = Field(default_factory=list)
+    matchedFilters: list[str] = Field(default_factory=list)
 
 
 class GroupConstraints(BaseModel):
@@ -70,6 +74,8 @@ class Recommendation(BaseModel):
     predictedEnjoyment: dict[str, float] = Field(default_factory=dict)
     breakdown: dict[str, float | bool]
     reasons: list[str]
+    missingFields: list[str] = Field(default_factory=list)
+    matchedFilters: list[str] = Field(default_factory=list)
 
 
 class RecommendationResponse(BaseModel):

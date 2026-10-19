@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { emptyGroupPreferences } from "../constants";
-import type { Group, GroupPreferences, Suggestion, User, VoteChoice } from "../types";
+import type { Group, GroupPreferences, PlaceSignal, Suggestion, User, VoteChoice } from "../types";
 import type { DiscoveryFilters } from "./useExperiences";
 
 type Action = (work: () => Promise<void>) => Promise<void>;
@@ -115,7 +115,7 @@ export function useGroups(
     recommendationRequest.current += 1;
     setSuggestions([]);
   }, []);
-  const recommend = useCallback(async (filters?: DiscoveryFilters, silent = false, experienceIds: string[] = []) => {
+  const recommend = useCallback(async (filters?: DiscoveryFilters, silent = false, experienceIds: string[] = [], placeSignals: PlaceSignal[] = []) => {
     if (!groupId) {
       setError("Create a group or join one to get group recommendations.");
       return;
@@ -133,7 +133,10 @@ export function useGroups(
           category: filters?.category || undefined,
           budget: filters?.budget || undefined,
           intensity: filters?.intensity || undefined,
+          duration: filters?.duration || undefined,
+          setting: filters?.setting || undefined,
           experienceIds,
+          placeSignals,
         }),
       });
       if (requestId !== recommendationRequest.current) return;

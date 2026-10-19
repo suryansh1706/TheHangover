@@ -18,6 +18,8 @@ export function DiscoverPage() {
     setGroupId,
     experiences,
     loadingPlaces,
+    hasMorePlaces,
+    loadMorePlaces,
     useCurrentLocation,
     suggestions,
     invalidateRecommendations,
@@ -37,18 +39,14 @@ export function DiscoverPage() {
   const selectedGroup = groups.find((group) => group.id === groupId);
   const centerLatitude = selectedGroup?.preferences?.homeLatitude ?? draftPreferences.homeLatitude;
   const centerLongitude = selectedGroup?.preferences?.homeLongitude ?? draftPreferences.homeLongitude;
-  const orderedSuggestions = [...suggestions].sort((left, right) => {
-    const leftDistance = left.experience.distanceKm ?? Number.POSITIVE_INFINITY;
-    const rightDistance = right.experience.distanceKm ?? Number.POSITIVE_INFINITY;
-    return leftDistance - rightDistance;
-  });
+  const orderedSuggestions = suggestions;
 
   useEffect(() => {
     invalidateRecommendations();
     if (!groupId || loadingPlaces) return;
-    const timer = window.setTimeout(() => void recommend(filters, true, experiences.map(({ id }) => id)), 250);
+    const timer = window.setTimeout(() => void recommend(filters, true, experiences.map(({ id }) => id), experiences), 250);
     return () => window.clearTimeout(timer);
-  }, [experiences, filters.q, filters.category, filters.budget, filters.intensity, groupId, loadingPlaces, invalidateRecommendations, recommend]);
+  }, [experiences, filters.q, filters.category, filters.budget, filters.intensity, filters.duration, filters.radiusKm, filters.setting, groupId, loadingPlaces, invalidateRecommendations, recommend]);
 
   return (
     <>
@@ -65,7 +63,7 @@ export function DiscoverPage() {
             {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
           </select>
         </label>
-        <button className="button primary" onClick={() => void recommend(filters, false, experiences.map(({ id }) => id))} disabled={busy || !groupId}>
+        <button className="button primary" onClick={() => void recommend(filters, false, experiences.map(({ id }) => id), experiences)} disabled={busy || !groupId}>
           {busy ? "Finding ideas…" : "✦ Find group picks"}
         </button>
       </div>
@@ -125,19 +123,34 @@ export function DiscoverPage() {
           <option value="MODERATE">Moderate</option>
           <option value="HIGH">High</option>
         </select>
+        <input aria-label="Maximum duration in minutes" placeholder="Max duration / min" inputMode="numeric" value={filters.duration} onChange={(event) => setFilters((old) => ({ ...old, duration: event.target.value }))} />
         <select aria-label="Search radius" value={filters.radiusKm} onChange={(event) => setFilters((old) => ({ ...old, radiusKm: event.target.value }))}>
           {[5, 10, 25, 50, 100].map((radius) => <option key={radius} value={radius}>Within {radius} km</option>)}
         </select>
       </div>
 
       <p className="small-note">Powered by Geoapify · OpenStreetMap data. {loadingPlaces ? "Updating places…" : "Prices, setting, and effort appear only when listed."}</p>
+      <section className="nearby-results">
+        <div className="section-heading">
+          <div><p className="eyebrow">RETRIEVED NEAR YOU</p><h2>Nearby spots</h2></div>
+          <span className="small-note">{experiences.length} spots loaded</span>
+        </div>
+        {experiences.length ? <div className="cards">
+          {experiences.map((item, index) => (
+            <ExperienceCard key={item.id} item={item} rank={index + 1} saved={shortlistedIds.has(item.id)}
+              onSave={() => addToShortlist(item.id)} onTried={() => markTried(item.id, true)}
+              onVote={(choice) => vote(item.id, choice)} onFeedback={() => setFeedbackId(item.id)} />
+          ))}
+        </div> : <p className="small-note">No spots match this search yet. Try a wider radius or clear a filter.</p>}
+        {hasMorePlaces && <button className="button subtle load-more" disabled={loadingPlaces} onClick={() => void loadMorePlaces()}>{loadingPlaces ? "Loading spots…" : "Load more spots"}</button>}
+      </section>
       <>
           <div className="section-heading">
             <div>
               <p className="eyebrow">MATCHED TO YOUR GROUP</p>
               <h2>Group picks</h2>
             </div>
-            <span className="small-note">{busy || loadingPlaces ? "Updating group picks…" : `${orderedSuggestions.length} picks · nearest first`}</span>
+            <span className="small-note">{busy || loadingPlaces ? "Updating group picks…" : `${orderedSuggestions.length} ranked picks`}</span>
           </div>
           {orderedSuggestions.length ? <div className="cards">
             {orderedSuggestions.map((item, index) => (
