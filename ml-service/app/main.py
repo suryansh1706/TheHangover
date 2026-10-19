@@ -1,17 +1,30 @@
 ﻿import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from app.recommender import recommend
+from app.recommender import preload_encoder, recommend
 from app.schemas import RecommendationRequest
 from app.schemas import TrainingRequest
-from app.model import train
+from app.model import load_model, train
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-app = FastAPI(title="The Hangover ML Service", version="0.2.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    load_model()
+    if os.getenv("USE_SEMANTIC_ENCODER", "true").casefold() not in {"0", "false", "no"}:
+        try:
+            preload_encoder()
+        except Exception:
+            # Preserve the TF-IDF fallback if the embedding model cannot load.
+            pass
+    yield
+
+
+app = FastAPI(title="The Hangover ML Service", version="0.2.0", lifespan=lifespan)
 
 
 def check_internal_token(x_ml_service_token: str | None = Header(default=None)) -> None:

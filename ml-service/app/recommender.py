@@ -21,10 +21,22 @@ def _load_encoder() -> Any:
     return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
 
-@lru_cache(maxsize=10_000)
-def _cached_activity_vector(text: str) -> tuple[float, ...]:
-    vector = _load_encoder().encode([text], normalize_embeddings=True)[0]
-    return tuple(float(value) for value in vector)
+_TEXT_VECTOR_CACHE: dict[str, np.ndarray] = {}
+
+
+def _cached_text_vectors(texts: list[str]) -> np.ndarray:
+    missing = list(dict.fromkeys(text for text in texts if text not in _TEXT_VECTOR_CACHE))
+    if missing:
+        vectors = _load_encoder().encode(missing, batch_size=64, normalize_embeddings=True)
+        for text, vector in zip(missing, vectors):
+            _TEXT_VECTOR_CACHE[text] = np.asarray(vector, dtype=float)
+    if not texts:
+        return np.empty((0, 0), dtype=float)
+    return np.asarray([_TEXT_VECTOR_CACHE[text] for text in texts])
+
+
+def preload_encoder() -> None:
+    _load_encoder()
 
 
 def _texts(request: RecommendationRequest) -> tuple[list[str], list[str]]:
@@ -40,10 +52,10 @@ def _similarities(request: RecommendationRequest) -> tuple[np.ndarray, str]:
     if os.getenv("USE_SEMANTIC_ENCODER", "true").casefold() in {"0", "false", "no"}:
         return _tfidf_similarities(activity_text, member_text)
     try:
-        encoder = _load_encoder()
-        activity_vectors = np.asarray([_cached_activity_vector(text) for text in activity_text])
-        member_vectors = encoder.encode(member_text, normalize_embeddings=True)
-        return np.asarray(member_vectors) @ np.asarray(activity_vectors).T, "all-MiniLM-L6-v2"
+        vectors = _cached_text_vectors(activity_text + member_text)
+        activity_vectors = vectors[:len(activity_text)]
+        member_vectors = vectors[len(activity_text):]
+        return member_vectors @ activity_vectors.T, "all-MiniLM-L6-v2"
     except Exception:
         return _tfidf_similarities(activity_text, member_text)
 

@@ -180,7 +180,7 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
-      limit: Math.max(activities.length, 1),
+      limit: Math.min(Math.max(activities.length, 1), 20),
       groupConstraints: {
         budgetPerPerson: group.preferences?.budgetPerPerson ?? null,
         maxDurationMins: group.preferences?.maxDurationMins ?? null,
@@ -234,7 +234,8 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
       return response.status(502).json({ error: "Recommendation service could not score this group" });
     }
     const result = await mlResponse.json() as { modelVersion: string; recommendations: Array<{ activityId: string }> };
-    await prisma.recommendationRun.create({ data: { groupId, modelVersion: result.modelVersion, inputSnapshot: payload, resultSnapshot: result } });
+    void prisma.recommendationRun.create({ data: { groupId, modelVersion: result.modelVersion, inputSnapshot: payload, resultSnapshot: result } })
+      .catch((error) => console.error("Failed to save recommendation run", error));
     const selected = new Set(result.recommendations.map(({ activityId }) => activityId));
     const activitiesById = new Map(activities.filter((activity) => selected.has(activity.id)).map((activity) => [activity.id, activity]));
     const centerLatitude = group.preferences?.homeLatitude ?? group.memberships[0]?.user.preferences?.homeLatitude;
