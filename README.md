@@ -90,27 +90,40 @@ When enabled, the recommender uses the `all-MiniLM-L6-v2` sentence encoder to tu
 
 The service caches text vectors in memory and encodes missing texts together in batches of up to 64. Batching avoids repeatedly starting the encoder for every individual place. The encoder and saved enjoyment model are loaded at service startup so the first recommendation request does not need to do that work. If semantic encoding is disabled or cannot load, the service uses a TF-IDF text matching fallback. TF-IDF gives more weight to words that help distinguish one description from another.
 
-## Feedback, machine learning, and data science
+## Data science and machine learning
 
-The normal recommendation score works before the app has learned from any outings. It uses place details, member preferences, and clear scoring rules. A separate optional model can learn to estimate enjoyment from real feedback after the group has tried activities.
+This is a separate view of what the app's data science does. It has two jobs: rank places using information available now, and learn from outing ratings to estimate enjoyment later. The first job works even when the app has no feedback. The second job is optional and only starts after enough real ratings have been collected. Neither job invents place facts or guarantees that a group will enjoy a place.
 
-### What gets learned
+### Algorithms used to find and rank places
 
-After a completed outing, members can rate enjoyment and whether they would repeat it. They can also rate adventure, social atmosphere, value for money, and difficulty. The app saves that feedback with a snapshot of the place and the prediction/model version, if one was used. The snapshot matters because a place record or model may change later; the saved snapshot shows what was known at the time.
+- **Rule-based filters:** known conflicts such as an over-budget price or a disliked category can remove a place. Unknown values pass through and receive a small penalty, because “not listed” does not mean “bad.”
+- **Structured preference matching:** the recommender compares place categories and tags with each member's preferred categories and tags, then calculates an overlap score. This works without a trained model and is easy to inspect.
+- **Sentence embeddings with cosine similarity:** `all-MiniLM-L6-v2` converts place descriptions and member preference text into vectors. The dot product between normalized vectors is cosine similarity: a measure of how close their meanings are. This helps match related phrases even if they do not use the same words.
+- **TF-IDF with cosine similarity:** if semantic embeddings are disabled or fail to load, TF-IDF creates word-based vectors (including pairs of neighboring words) and cosine similarity compares them. This fallback is lighter but is less good at understanding synonyms.
+- **Weighted group score:** each member gets a preference score from text similarity and structured overlap. The group score gives extra weight to the lowest member score, so one person's strong match cannot hide a poor fit for someone else. It also includes novelty, popularity, proximity, matching filters, and a penalty for missing details.
+- **Novelty calculation:** novelty is `1 - (members who tried the place / group size)`. A place nobody has tried gets 1; if everyone has tried it, it gets 0. This changes ranking, but tried places are not automatically removed.
+- **Category diversification:** after sorting, a small penalty is applied to categories already selected. This helps the final list contain different kinds of outings.
+- **Haversine distance:** this formula estimates straight-line distance between coordinates and is used for radius checks and proximity ranking. It does not estimate travel time or road distance.
 
-The training code in `ml-service/app/model.py` waits for at least 30 feature-linked ratings from at least 5 separate outings. It builds features from known place and feedback details, then compares a simple average predictor, Ridge regression, and a random forest. These are small statistical models:
+Text vectors are cached in memory. The service encodes uncached text in batches of up to 64, and preloads the encoder at startup when enabled. This reduces repeated work while generating recommendations.
 
-- The **mean baseline** always predicts the average rating. It is the simple score a more advanced model should try to beat.
-- **Ridge regression** learns how input details tend to move a rating up or down, while limiting overly large effects.
-- A **random forest** combines many decision trees so it can learn more complicated combinations of details.
+### Algorithms used to learn enjoyment
 
-The service checks candidate models with GroupKFold validation grouped by outing. Keeping one outing's feedback together helps prevent ratings from the same event leaking into both learning and checking data. It reports mean absolute error (MAE), which is the average size of the prediction mistake in rating points. The selected model is only useful if its measured results are better enough than the baseline; a prediction is never a guarantee of enjoyment.
+After a completed outing, members can rate enjoyment and whether they would repeat it. They can also rate adventure, social atmosphere, value for money, and difficulty. The app saves each rating with a snapshot of place/member features and the prediction/model version, if one was used. Features include known price and duration, activity category and tags, setting and intensity, interest overlap, member limits, and whether that member has tried the place.
 
-Training saves the model locally under `ml-service/data/` and reloads it after training. Until a model is trained, recommendations still work using the preference and content scoring rules. Analytics summarize submitted feedback and model evaluation; observed later prediction errors and held-out validation results are shown as different things.
+The training code in `ml-service/app/model.py` waits for at least 30 feature-linked ratings from at least 5 separate outings. It compares three regression algorithms:
 
-### What the app does not claim
+- **Mean baseline (`DummyRegressor`):** always predicts the average rating. This gives a simple score to beat.
+- **Ridge regression:** learns how input features tend to raise or lower a rating. Its regularization helps keep the learned weights from growing too large when examples are limited.
+- **Random forest regression:** combines 200 decision trees. Each tree learns rules from examples, and the forest averages their predictions to model combinations that a straight line may miss.
 
-The popularity score is a small ranking heuristic, not a measured count of visitors. A place being nearby does not mean it is open now or reachable by a particular route. An embedding measures text similarity, not a person's feelings. The enjoyment model learns from the ratings that have actually been submitted and can be uncertain, especially with little data. Recommendation explanations come from score signals, not generated text.
+Each candidate is checked with **GroupKFold cross-validation**, keeping feedback from the same outing together. This tests whether a model can predict ratings from outings it did not train on, rather than letting closely related examples appear on both sides. The service measures **mean absolute error (MAE)**: the average number of rating points the predictions miss by. It selects the candidate with the lowest validation MAE, saves it locally, and keeps it in memory. The model is loaded at service startup and reloaded after training, rather than read from disk for every prediction.
+
+When a trained enjoyment model is available, its predicted rating is combined with the preference-fit score. The prediction contributes 60% and the existing preference score contributes 40%. Predicted ratings are clipped to the 1-to-5 rating range. Before training, group recommendations still work with the preference and content scoring methods above; there is simply no learned enjoyment prediction.
+
+### How to read the results
+
+Analytics show actual submitted ratings, held-out model evaluation, and observed prediction errors as separate measures. A lower MAE means smaller average errors in the evaluation data, not perfect predictions. The popularity score is a listing-quality heuristic, not a visitor count. Text similarity is not a measure of feelings. Recommendation explanations come from score signals, not generated text.
 
 ## Groups and invitations
 
