@@ -222,9 +222,14 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     if (process.env.ML_SERVICE_TOKEN) headers["x-ml-service-token"] = process.env.ML_SERVICE_TOKEN;
     const mlResponse = await fetch(`${mlServiceUrl()}/recommendations`, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(mlServiceTimeoutMs) });
     if (!mlResponse.ok) {
+      const upstreamBody = (await mlResponse.text()).slice(0, 2000);
       console.error("Recommendation service returned an error", {
         status: mlResponse.status,
         statusText: mlResponse.statusText,
+        body: upstreamBody,
+        groupId,
+        memberCount: payload.members.length,
+        activityCount: payload.activities.length,
       });
       return response.status(502).json({ error: "Recommendation service could not score this group" });
     }
