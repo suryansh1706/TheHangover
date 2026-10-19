@@ -10,6 +10,7 @@ const searchSchema = z.object({
   longitude: z.coerce.number().min(-180).max(180).optional(),
   radiusKm: z.coerce.number().min(1).max(100).default(10),
   category: z.enum(["entertainment", "leisure", "catering", "sport", "tourism"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 }).refine((query) => (query.latitude === undefined) === (query.longitude === undefined), "Provide latitude and longitude together")
   .refine((query) => Boolean(query.city || query.latitude !== undefined), "Provide a city or location");
 
@@ -18,6 +19,11 @@ type ProviderPlace = { properties?: Record<string, unknown> };
 type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & { distanceKm: number | null };
 
 const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
+const popularHangoutCategories = [
+  "catering.cafe", "catering.restaurant", "catering.food_court", "catering.ice_cream",
+  "entertainment.cinema", "entertainment.culture", "entertainment.amusement_arcade", "entertainment.zoo",
+  "entertainment.museum", "leisure.park", "tourism.attraction", "tourism.sights",
+];
 const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
 let requestQueue: Promise<void> = Promise.resolve();
 let lastProviderCall = 0;
@@ -75,6 +81,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     if (!center) return [];
 
     const keywordIntent = input.keyword ? placeSearchIntent(input.keyword) : undefined;
+    const popularMode = !input.keyword && !input.category;
     const keywordCategories = keywordIntent?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
     const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
     const categoryQueries = new Set<string>();
@@ -85,7 +92,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         : [...new Set(keywordIntent.categories.map((category) => category.split(".")[0]))].join(",");
       if (broadCategories) categoryQueries.add(broadCategories);
     } else {
-      categoryQueries.add(input.category ?? placeCategories.join(","));
+      categoryQueries.add(popularMode ? popularHangoutCategories.join(",") : input.category ?? placeCategories.join(","));
     }
     const placeBatches = await Promise.all([...categoryQueries].map(async (categories) => {
       const batch: ProviderPlace[] = [];
@@ -94,13 +101,15 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         placesUrl.searchParams.set("categories", categories);
         placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
         placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-        placesUrl.searchParams.set("limit", "500");
-        placesUrl.searchParams.set("offset", String(offset));
+        placesUrl.searchParams.set("limit", popularMode ? "100" : "500");
+        if (popularMode) placesUrl.searchParams.set("conditions", "named");
+        else placesUrl.searchParams.set("offset", String(offset));
         placesUrl.searchParams.set("apiKey", apiKey);
         const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
         const features = (payload as { features?: unknown } | null)?.features;
         const page = Array.isArray(features) ? features.filter(providerPlace) : [];
         batch.push(...page);
+        if (popularMode) break;
         if (page.length < 500) break;
       }
       return batch;
@@ -118,17 +127,31 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
       const distance = latitude === null || longitude === null
         ? Number.POSITIVE_INFINITY
         : distanceKm(latitude, longitude, center!.lat, center!.lon);
-      const properties: Record<string, unknown> = {
+      const placeProperties: Record<string, unknown> = {
         ...(place.properties ?? {}),
         distanceKm: Number.isFinite(distance) ? distance : undefined,
       };
+      const properties = place.properties ?? {};
+      const hasValue = (value: unknown): boolean => typeof value === "string"
+        ? Boolean(value.trim())
+        : typeof value === "object" && value !== null && Object.values(value).some((item) => typeof item === "string" && Boolean(item.trim()));
+      const wiki = properties.wiki_and_media;
+      const hasWiki = hasValue(properties.wikidata) || hasValue(properties.wikipedia)
+        || (typeof wiki === "object" && wiki !== null && (hasValue((wiki as Record<string, unknown>).wikidata) || hasValue((wiki as Record<string, unknown>).wikipedia)));
+      const popularity = (hasWiki ? 5 : 0)
+        + (hasValue(properties.website) ? 3 : 0)
+        + (hasValue(properties.brand) ? 2 : 0)
+        + (hasValue(properties.opening_hours) ? 1 : 0)
+        + (hasValue(properties.phone) ? 1 : 0)
+        - (Number.isFinite(distance) ? distance * 0.25 : 1000);
       return {
-        place: { ...place, properties },
+        place: { ...place, properties: placeProperties },
         distance,
+        popularity,
       };
-    }).sort((a, b) => a.distance - b.distance).map(({ place }) => place);
+    }).sort((a, b) => popularMode ? b.popularity - a.popularity : a.distance - b.distance).map(({ place }) => place);
 
-    if (!input.keyword) return rankedPlaces;
+    if (!input.keyword) return popularMode ? rankedPlaces.slice(0, input.limit ?? 10) : rankedPlaces;
     const matches = rankedPlaces.flatMap((place) => {
       const name = place.properties?.name;
       const categories = place.properties?.categories;
@@ -263,7 +286,7 @@ export async function searchAndStorePlaces(rawQuery: unknown) {
       console.warn("Skipping invalid Geoapify place", placeId);
     }
   }
-  const rows = [...uniqueRows.values()];
+  const rows = [...uniqueRows.values()].slice(0, !query.keyword && !query.category ? query.limit ?? 10 : undefined);
   for (let start = 0; start < rows.length; start += 10) {
     const chunk = rows.slice(start, start + 10);
     await Promise.all(chunk.map(({ data }) => prisma.experience.upsert({ where: { slug: data.slug }, create: data, update: data })));
