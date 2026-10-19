@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../config/db.js";
 import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
-import { placeSearchIntent } from "../services/placeSearchIntent.js";
 import { newToken, requireAuth, tokenDigest } from "../config/security.js";
 
 export const groupsRouter = Router();
@@ -161,21 +160,9 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     activityFilters.push({ id: { in: filters.experienceIds } });
     if (filters.budget !== undefined) activityFilters.push({ priceMax: { lte: filters.budget }, currency: "INR" });
     if (filters.intensity) activityFilters.push({ intensity: filters.intensity });
-    if (filters.q) {
-      const intent = placeSearchIntent(filters.q);
-      activityFilters.push({
-        OR: [
-          ...intent.terms.flatMap((term) => [
-            { name: { contains: term, mode: "insensitive" as const } },
-            { description: { contains: term, mode: "insensitive" as const } },
-            { category: { contains: term, mode: "insensitive" as const } },
-            { locationName: { contains: term, mode: "insensitive" as const } },
-          ]),
-          ...intent.matchCategories.map((category) => ({ category: { startsWith: category, mode: "insensitive" as const } })),
-          { tags: { hasSome: [...intent.terms, ...intent.matchCategories] } },
-        ],
-      });
-    }
+    // Keyword searches already send matching Geoapify experience IDs. Applying a
+    // second text match here can discard valid provider results whose category
+    // labels differ from the search intent terms.
     const activities = await prisma.experience.findMany({ where: { active: true, AND: activityFilters } });
     const payload = {
       groupId,

@@ -87,10 +87,8 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
     const categoryQueries = new Set<string>();
     if (keywordIntent?.categories.length) {
       if (keywordCategories?.length) categoryQueries.add(keywordCategories.join(","));
-      const broadCategories = input.category
-        ? input.category
-        : [...new Set(keywordIntent.categories.map((category) => category.split(".")[0]))].join(",");
-      if (broadCategories) categoryQueries.add(broadCategories);
+      else if (input.category) categoryQueries.add(input.category);
+      else categoryQueries.add([...new Set(keywordIntent.categories.map((category) => category.split(".")[0]))].join(","));
     } else {
       categoryQueries.add(popularMode ? popularHangoutCategories.join(",") : input.category ?? placeCategories.join(","));
     }
@@ -101,7 +99,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         placesUrl.searchParams.set("categories", categories);
         placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
         placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-        placesUrl.searchParams.set("limit", popularMode ? "100" : "500");
+        placesUrl.searchParams.set("limit", popularMode || input.keyword ? "100" : "500");
         if (popularMode) placesUrl.searchParams.set("conditions", "named");
         else placesUrl.searchParams.set("offset", String(offset));
         placesUrl.searchParams.set("apiKey", apiKey);
@@ -109,7 +107,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         const features = (payload as { features?: unknown } | null)?.features;
         const page = Array.isArray(features) ? features.filter(providerPlace) : [];
         batch.push(...page);
-        if (popularMode) break;
+        if (popularMode || input.keyword) break;
         if (page.length < 500) break;
       }
       return batch;
