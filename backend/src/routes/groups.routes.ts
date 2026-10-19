@@ -167,7 +167,7 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     const payload = {
       groupId,
       modelVersion: "group-content-v1",
-      limit: Math.min(Math.max(activities.length, 1), 20),
+      limit: Math.min(Math.max(activities.length, 1), 10000),
       groupConstraints: {
         budgetPerPerson: group.preferences?.budgetPerPerson ?? null,
         maxDurationMins: group.preferences?.maxDurationMins ?? null,

@@ -99,7 +99,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         placesUrl.searchParams.set("categories", categories);
         placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
         placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-        placesUrl.searchParams.set("limit", popularMode || input.keyword ? "100" : "500");
+        placesUrl.searchParams.set("limit", popularMode ? "100" : "500");
         if (popularMode) placesUrl.searchParams.set("conditions", "named");
         else placesUrl.searchParams.set("offset", String(offset));
         placesUrl.searchParams.set("apiKey", apiKey);
@@ -107,7 +107,7 @@ async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
         const features = (payload as { features?: unknown } | null)?.features;
         const page = Array.isArray(features) ? features.filter(providerPlace) : [];
         batch.push(...page);
-        if (popularMode || input.keyword) break;
+        if (popularMode) break;
         if (page.length < 500) break;
       }
       return batch;
