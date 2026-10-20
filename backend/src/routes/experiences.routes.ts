@@ -14,12 +14,14 @@ experiencesRouter.get("/", async (request, response, next) => {
       intensity: z.enum(["LOW", "MODERATE", "HIGH"]).optional(),
       q: z.string().trim().max(100).optional(),
     }).parse(request.query);
+
     const clauses: Prisma.ExperienceWhereInput[] = [];
     if (filters.category) clauses.push({ category: { equals: filters.category, mode: "insensitive" } });
     if (filters.budget !== undefined) clauses.push({ priceMax: { lte: filters.budget }, currency: "INR" });
     if (filters.setting && filters.setting !== "EITHER") clauses.push({ setting: { in: [filters.setting, "EITHER"] } });
     if (filters.intensity) clauses.push({ intensity: filters.intensity });
     if (filters.q) clauses.push({ OR: [{ name: { contains: filters.q, mode: "insensitive" } }, { description: { contains: filters.q, mode: "insensitive" } }] });
+    
     const experiences = await prisma.experience.findMany({ where: { active: true, AND: clauses }, orderBy: { name: "asc" }, take: 100 });
     return response.json({ experiences });
   } catch (error) { return next(error); }

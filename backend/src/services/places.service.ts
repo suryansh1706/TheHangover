@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { prisma } from "../config/db.js";
-import { placeSearchIntent } from "./placeSearchIntent.js";
+import { createTtlLruCache } from "./places.cache.js";
+import { CACHE_MAX_ENTRIES, CACHE_TTL_MS } from "./places.constants.js";
+import { placeData } from "./places.mapper.js";
+import { filterPlace, scorePlace } from "./places.ranking.js";
+import { searchProvider } from "./places.provider.js";
+import type { NearbyExperience, Search, SearchPage } from "./places.types.js";
 
 const searchSchema = z.object({
   keyword: z.string().trim().max(100).optional(),
@@ -19,401 +24,48 @@ const searchSchema = z.object({
 }).refine((query) => (query.latitude === undefined) === (query.longitude === undefined), "Provide latitude and longitude together")
   .refine((query) => Boolean(query.city || query.latitude !== undefined), "Provide a city or location");
 
-type Search = z.infer<typeof searchSchema>;
-type ProviderPlace = { properties?: Record<string, unknown> };
-type NearbyExperience = Awaited<ReturnType<typeof prisma.experience.findMany>>[number] & {
-  distanceKm: number | null;
-  popularityScore: number;
-  missingFields: string[];
-  matchedFilters: string[];
-};
-type SearchPage = { experiences: NearbyExperience[]; hasMore: boolean; nextOffset: number | null };
+const cache = createTtlLruCache<NearbyExperience[]>(CACHE_MAX_ENTRIES, CACHE_TTL_MS);
 
-const placeCategories = ["entertainment", "leisure", "catering", "sport", "tourism"];
-const popularHangoutCategories = [
-  "catering.cafe", "catering.restaurant", "catering.food_court", "catering.ice_cream",
-  "entertainment.cinema", "entertainment.culture", "entertainment.amusement_arcade", "entertainment.zoo",
-  "entertainment.museum", "leisure.park", "tourism.attraction", "tourism.sights",
-];
-const cache = new Map<string, { expiresAt: number; records: NearbyExperience[] }>();
-let requestQueue: Promise<void> = Promise.resolve();
-let lastProviderCall = 0;
-
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+async function loadPlaces(query: Search): Promise<NearbyExperience[]> {
+  const providerResult = await searchProvider(query);
+  const candidates = providerResult.places.map((place) => ({ ...scorePlace(place, providerResult.center), data: placeData(place) }))
+    .filter((candidate): candidate is typeof candidate & { data: NonNullable<typeof candidate.data> } => candidate.data !== null);
+  const slugs = candidates.map(({ data }) => data.slug);
+  const existing = slugs.length ? await prisma.experience.findMany({ where: { slug: { in: slugs } } }) : [];
+  const existingSlugs = new Set(existing.map(({ slug }) => slug));
+  const newRows = candidates.filter(({ data }) => !existingSlugs.has(data.slug)).map(({ data }) => data);
+  const records = await prisma.$transaction(async (transaction) => {
+    if (newRows.length) await transaction.experience.createMany({ data: newRows, skipDuplicates: true });
+    return slugs.length ? transaction.experience.findMany({ where: { slug: { in: slugs } } }) : [];
+  });
+  const recordsBySlug = new Map(records.map((record) => [record.slug, record]));
+  return candidates.flatMap((candidate) => {
+    const record = recordsBySlug.get(candidate.data.slug);
+    if (!record) return [];
+    const filtered = filterPlace(candidate, record, query);
+    return filtered ? [filtered] : [];
+  }).sort((a, b) => b.score - a.score).map(({ record }) => record);
 }
 
-function distanceKm(latitude: number, longitude: number, centerLatitude: number, centerLongitude: number) {
-  const radians = (degrees: number) => degrees * Math.PI / 180;
-  const dLat = radians(centerLatitude - latitude);
-  const dLon = radians(centerLongitude - longitude);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(radians(latitude)) * Math.cos(radians(centerLatitude)) * Math.sin(dLon / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function providerPlace(value: unknown): value is ProviderPlace {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function fetchGeoapify(url: URL): Promise<Response> {
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
-    return response;
-  } catch {
-    throw new Error("EVENT_PROVIDER_REQUEST_FAILED");
-  }
-}
-
-async function searchGeoapifyPlaces(input: Search): Promise<ProviderPlace[]> {
-  const apiKey = process.env.GEOAPIFY_API_KEY;
-  if (!apiKey) throw new Error("EVENT_PROVIDER_NOT_CONFIGURED");
-
-  try {
-    let center: { lat: number; lon: number; placeId?: string } | undefined;
-    if (input.city) {
-      const geocodeUrl = new URL("https://api.geoapify.com/v1/geocode/search");
-      geocodeUrl.searchParams.set("text", input.city);
-      geocodeUrl.searchParams.set("format", "json");
-      geocodeUrl.searchParams.set("type", "city");
-      geocodeUrl.searchParams.set("limit", "1");
-      geocodeUrl.searchParams.set("filter", `countrycode:${(input.countryCode ?? "IN").toLowerCase()}`);
-      geocodeUrl.searchParams.set("apiKey", apiKey);
-      const geocodePayload: unknown = await (await fetchGeoapify(geocodeUrl)).json();
-      const result = (geocodePayload as { results?: Array<{ lat?: unknown; lon?: unknown; place_id?: unknown }> } | null)?.results?.[0];
-      const lat = finiteNumber(result?.lat);
-      const lon = finiteNumber(result?.lon);
-      if (lat === null || lon === null) throw new Error("EVENT_LOCATION_NOT_FOUND");
-      center = { lat, lon, placeId: typeof result?.place_id === "string" ? result.place_id : undefined };
-    } else if (input.latitude !== undefined && input.longitude !== undefined) {
-      center = { lat: input.latitude, lon: input.longitude };
-    }
-    if (!center) return [];
-
-    const keywordIntent = input.keyword ? placeSearchIntent(input.keyword) : undefined;
-    const popularMode = !input.keyword && !input.category && input.budget === undefined
-      && input.intensity === undefined && input.duration === undefined && input.setting === undefined;
-    const keywordCategories = keywordIntent?.categories.filter((category) => !input.category || category === input.category || category.startsWith(`${input.category}.`));
-    const circleFilter = `circle:${center.lon},${center.lat},${Math.round(input.radiusKm * 1000)}`;
-    const categoryQueries = new Set<string>();
-    if (keywordIntent?.categories.length) {
-      if (keywordCategories?.length) categoryQueries.add(keywordCategories.join(","));
-      else if (input.category) categoryQueries.add(input.category);
-      else categoryQueries.add([...new Set(keywordIntent.categories.map((category) => category.split(".")[0]))].join(","));
-    } else {
-      categoryQueries.add(popularMode ? popularHangoutCategories.join(",") : input.category ?? placeCategories.join(","));
-    }
-    const candidateLimit = 200;
-    const placeBatches = await Promise.all([...categoryQueries].map(async (categories) => {
-      const batch: ProviderPlace[] = [];
-      const pageSize = popularMode ? 100 : 200;
-      for (let offset = 0; offset < candidateLimit; offset += pageSize) {
-        const placesUrl = new URL("https://api.geoapify.com/v2/places");
-        placesUrl.searchParams.set("categories", categories);
-        placesUrl.searchParams.set("filter", center.placeId ? `place:${center.placeId}|${circleFilter}` : circleFilter);
-        placesUrl.searchParams.set("bias", `proximity:${center.lon},${center.lat}`);
-        placesUrl.searchParams.set("limit", String(pageSize));
-        if (popularMode) placesUrl.searchParams.set("conditions", "named");
-        placesUrl.searchParams.set("offset", String(offset));
-        placesUrl.searchParams.set("apiKey", apiKey);
-        const payload: unknown = await (await fetchGeoapify(placesUrl)).json();
-        const features = (payload as { features?: unknown } | null)?.features;
-        const page = Array.isArray(features) ? features.filter(providerPlace) : [];
-        batch.push(...page);
-        if (page.length < pageSize) break;
-      }
-      return batch;
-    }));
-    const uniquePlaces = new Map<string, ProviderPlace>();
-    for (const place of placeBatches.flat()) {
-      const placeId = place.properties?.place_id;
-      const name = String(place.properties?.name ?? "").trim().toLocaleLowerCase();
-      const latitude = finiteNumber(place.properties?.lat);
-      const longitude = finiteNumber(place.properties?.lon);
-      const key = typeof placeId === "string" || typeof placeId === "number"
-        ? String(placeId)
-        : `${name}|${latitude ?? ""}|${longitude ?? ""}`;
-      if (!uniquePlaces.has(key)) uniquePlaces.set(key, place);
-    }
-    const places = [...uniquePlaces.values()];
-    const rankedPlaces = places.map((place) => {
-      const latitude = finiteNumber(place.properties?.lat);
-      const longitude = finiteNumber(place.properties?.lon);
-      const distance = latitude === null || longitude === null
-        ? Number.POSITIVE_INFINITY
-        : distanceKm(latitude, longitude, center!.lat, center!.lon);
-      const placeProperties: Record<string, unknown> = {
-        ...(place.properties ?? {}),
-        distanceKm: Number.isFinite(distance) ? distance : undefined,
-      };
-      const properties = place.properties ?? {};
-      const hasValue = (value: unknown): boolean => typeof value === "string"
-        ? Boolean(value.trim())
-        : typeof value === "object" && value !== null && Object.values(value).some((item) => typeof item === "string" && Boolean(item.trim()));
-      const wiki = properties.wiki_and_media;
-      const hasWiki = hasValue(properties.wikidata) || hasValue(properties.wikipedia)
-        || (typeof wiki === "object" && wiki !== null && (hasValue((wiki as Record<string, unknown>).wikidata) || hasValue((wiki as Record<string, unknown>).wikipedia)));
-      const popularity = (hasWiki ? 5 : 0)
-        + (hasValue(properties.website) ? 3 : 0)
-        + (hasValue(properties.brand) ? 2 : 0)
-        + (hasValue(properties.opening_hours) ? 1 : 0)
-        + (hasValue(properties.phone) ? 1 : 0);
-      return {
-        place: { ...place, properties: { ...placeProperties, popularityScore: popularity } } as ProviderPlace,
-        distance,
-        popularity,
-      };
-    });
-    const matches = rankedPlaces.flatMap(({ place, distance, popularity }) => {
-      const name = place.properties?.name;
-      const categories = place.properties?.categories;
-      const placeCategoryNames = Array.isArray(categories)
-        ? categories.filter((category): category is string => typeof category === "string")
-        : [];
-      const searchText = [typeof name === "string" || typeof name === "number" ? String(name) : "", ...placeCategoryNames, typeof place.properties?.formatted === "string" ? place.properties.formatted : ""]
-        .join(" ").toLocaleLowerCase().replace(/[\s_.-]+/g, " ");
-      const terms = keywordIntent?.terms ?? [];
-      const matchesKeyword = !input.keyword || terms.some((term) => searchText.includes(term.replace(/[\s_.-]+/g, " ")));
-      const matchesCategory = !input.category || !placeCategoryNames.length || placeCategoryNames.some((category) =>
-        category.toLocaleLowerCase() === input.category!.toLocaleLowerCase()
-        || category.toLocaleLowerCase().startsWith(`${input.category!.toLocaleLowerCase()}.`),
-      );
-      const keywordCategoryMatch = Boolean(keywordIntent?.matchCategories.some((category) =>
-        placeCategoryNames.some((placeCategory) => placeCategory.toLocaleLowerCase().startsWith(category.toLocaleLowerCase())),
-      ));
-      if (input.keyword && !matchesKeyword && !keywordCategoryMatch) return [];
-      if (!matchesCategory) return [];
-      const latitude = finiteNumber(place.properties?.lat);
-      const longitude = finiteNumber(place.properties?.lon);
-      if (Number.isFinite(distance) && distance > input.radiusKm) return [];
-      const missingFields: string[] = [];
-      const matchedFilters: string[] = [];
-      let relevance = 0;
-      if (input.keyword) { matchedFilters.push("keyword"); relevance += matchesKeyword ? 2 : 1; }
-      if (input.category) { matchedFilters.push("category"); relevance += 1; }
-      const raw = place.properties ?? {};
-      const price = finiteNumber(raw.price_max) ?? finiteNumber(raw.price);
-      if (input.budget !== undefined) {
-        if (price === null || (raw.currency !== "INR" && raw.currency !== "INR".toLowerCase())) missingFields.push("price");
-        else if (price > input.budget) return [];
-        else { matchedFilters.push("budget"); relevance += 1; }
-      }
-      const duration = finiteNumber(raw.duration_mins) ?? finiteNumber(raw.duration);
-      if (input.duration !== undefined) {
-        if (duration === null) missingFields.push("duration");
-        else if (duration > input.duration) return [];
-        else { matchedFilters.push("duration"); relevance += 1; }
-      }
-      const intensity = typeof raw.intensity === "string" ? raw.intensity.toUpperCase() : null;
-      if (input.intensity) {
-        if (!intensity) missingFields.push("intensity");
-        else if (["LOW", "MODERATE", "HIGH"].indexOf(intensity) > ["LOW", "MODERATE", "HIGH"].indexOf(input.intensity)) return [];
-        else { matchedFilters.push("intensity"); relevance += 1; }
-      }
-      const setting = typeof raw.setting === "string" ? raw.setting.toUpperCase() : null;
-      if (input.setting) {
-        if (!setting) missingFields.push("setting");
-        else if (setting !== input.setting && setting !== "EITHER") return [];
-        else { matchedFilters.push("setting"); relevance += 1; }
-      }
-      if (input.radiusKm) {
-        if (latitude === null || longitude === null) missingFields.push("distance");
-        else { matchedFilters.push("distance"); relevance += 0.5; }
-      }
-      const proximity = Number.isFinite(distance) ? -distance * 0.05 : -20;
-      const missingPenalty = missingFields.length * 0.5;
-      const finalScore = relevance + popularity + proximity - missingPenalty;
-      return [{ place: { ...place, properties: { ...place.properties, distanceKm: Number.isFinite(distance) ? distance : undefined, popularityScore: popularity, missingFields, matchedFilters, finalScore } } as ProviderPlace, distance, finalScore }];
-    });
-    return matches.sort((a, b) => b.finalScore - a.finalScore).map(({ place }) => place);
-  } catch (error) {
-    if (error instanceof Error && ["EVENT_LOCATION_NOT_FOUND", "EVENT_PROVIDER_REQUEST_FAILED"].includes(error.message)) throw error;
-    throw new Error("EVENT_PROVIDER_REQUEST_FAILED", { cause: error });
-  }
-}
-
-function placeData(place: ProviderPlace) {
-  const properties = place.properties ?? {};
-  const rawName = properties.name;
-  if (typeof rawName !== "string" && typeof rawName !== "number") return null;
-  const name = String(rawName).trim();
-  if (!name) return null;
-
-  const categories = Array.isArray(properties.categories)
-    ? properties.categories.filter((category): category is string => typeof category === "string").map((category) => category.trim()).filter(Boolean)
-    : [];
-  const formatted = typeof properties.formatted === "string" ? properties.formatted : null;
-  const website = typeof properties.website === "string" ? properties.website : null;
-  const rawPlaceId = typeof properties.place_id === "string" ? properties.place_id.trim() : "";
-  const latitude = finiteNumber(properties.lat);
-  const longitude = finiteNumber(properties.lon);
-  const placeId = rawPlaceId || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${latitude ?? ""}-${longitude ?? ""}`;
-  const categoryText = categories.join(" ").toLocaleLowerCase();
-  const description = categoryText.includes("comedy")
-    ? "A comedy venue for stand-up shows and live laughs."
-    : categoryText.includes("park") || categoryText.includes("garden")
-      ? "A green park for peaceful walks and outdoor time."
-      : categoryText.includes("sport") || categoryText.includes("stadium")
-        ? "A sports venue for games, training, and matches."
-        : categoryText.includes("museum") || categoryText.includes("historic")
-          ? "A museum for local history, culture, and exhibits."
-          : categoryText.includes("catering") || categoryText.includes("restaurant") || categoryText.includes("cafe")
-            ? "A place to enjoy meals, snacks, and drinks."
-            : categoryText.includes("entertainment")
-              ? "A local entertainment venue for live shows and gatherings."
-              : categoryText.includes("tourism") || categoryText.includes("attraction")
-                ? "A local attraction for sightseeing and memorable visits."
-                : "A nearby place for local activities and visits.";
-  return {
-    slug: `geoapify-${placeId}`,
-    name,
-    description,
-    category: categories[0] ?? "Place",
-    tags: categories,
-    priceMin: null,
-    priceMax: null,
-    currency: null,
-    locationName: formatted,
-    latitude,
-    longitude,
-    durationMins: null,
-    setting: null,
-    intensity: null,
-    socialLevel: null,
-    adventureLevel: null,
-    source: "Geoapify (OpenStreetMap)",
-    sourceUrl: website,
-    bookingUrl: website,
-    eventStartsAt: null,
-    eventLocalDate: null,
-    eventLocalTime: null,
-    eventTimeZone: null,
-    lastVerifiedAt: new Date(),
-    active: true,
-  };
-}
-
-async function searchWithRateLimit(input: Search) {
-  let release!: () => void;
-  const previous = requestQueue;
-  requestQueue = new Promise<void>((resolve) => { release = resolve; });
-  await previous;
-  try {
-    const waitMs = Math.max(0, 250 - (Date.now() - lastProviderCall));
-    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
-    lastProviderCall = Date.now();
-    return await searchGeoapifyPlaces(input);
-  } finally {
-    release();
-  }
-}
-
-export async function searchAndStorePlaces(rawQuery: unknown) {
+/** Search Geoapify, persist newly discovered places, and return a paged result. */
+export async function searchAndStorePlaces(rawQuery: unknown): Promise<SearchPage> {
   const query = searchSchema.parse(rawQuery);
   const { limit = 10, offset = 0, ...filters } = query;
   const cacheKey = JSON.stringify(filters);
-  const cached = cache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    const experiences = cached.records.slice(offset, offset + limit);
-    return { experiences, hasMore: offset + experiences.length < cached.records.length, nextOffset: offset + experiences.length < cached.records.length ? offset + experiences.length : null } satisfies SearchPage;
-  }
-  if (cached) cache.delete(cacheKey);
-
-  let places: ProviderPlace[];
+  let rankedRecords: NearbyExperience[];
   try {
-    places = await searchWithRateLimit(query);
+    rankedRecords = await cache.getOrCreate(cacheKey, () => loadPlaces(query));
   } catch (error) {
     console.error("Geoapify place search failed", error instanceof Error ? error.message : "Unknown error");
     throw error;
   }
-
-  const uniqueRows = new Map<string, { data: NonNullable<ReturnType<typeof placeData>>; distanceKm: number | null; popularityScore: number }>();
-  for (const place of places) {
-    const rawPlaceId = place.properties?.place_id;
-    const placeId = typeof rawPlaceId === "string" || typeof rawPlaceId === "number" ? rawPlaceId : "unknown";
-    try {
-      const data = placeData(place);
-      if (!data) {
-        console.warn("Skipping invalid Geoapify place", placeId);
-        continue;
-      }
-      if (!uniqueRows.has(data.slug)) {
-        uniqueRows.set(data.slug, {
-          data,
-          distanceKm: finiteNumber(place.properties?.distanceKm),
-          popularityScore: finiteNumber(place.properties?.popularityScore) ?? 0,
-        });
-      }
-    } catch {
-      console.warn("Skipping invalid Geoapify place", placeId);
-    }
-  }
-  const rows = [...uniqueRows.values()];
-  for (let start = 0; start < rows.length; start += 10) {
-    const chunk = rows.slice(start, start + 10);
-    await Promise.all(chunk.map(({ data }) => {
-      const update = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== null));
-      return prisma.experience.upsert({ where: { slug: data.slug }, create: data, update });
-    }));
-  }
-
-  const found = rows.length
-    ? await prisma.experience.findMany({ where: { slug: { in: rows.map(({ data }) => data.slug) } } })
-    : [];
-  const recordsBySlug = new Map(found.map((record) => [record.slug, record]));
-  const records = rows.flatMap(({ data, distanceKm, popularityScore }) => {
-    const record = recordsBySlug.get(data.slug);
-    if (!record) return [];
-    const missingFields: string[] = [];
-    const matchedFilters: string[] = [];
-    let relevance = 0;
-    if (record.priceMax === null) missingFields.push("price");
-    if (record.durationMins === null) missingFields.push("duration");
-    if (record.intensity === null) missingFields.push("intensity");
-    if (record.setting === null) missingFields.push("setting");
-    if (record.category === "Place") missingFields.push("category");
-    if (distanceKm === null) missingFields.push("distance");
-    if (query.keyword) { matchedFilters.push("keyword"); relevance += 2; }
-    if (query.category) {
-      if (record.category === "Place") missingFields.push("category");
-      else if (!record.category.toLocaleLowerCase().startsWith(query.category.toLocaleLowerCase())) return [];
-      else { matchedFilters.push("category"); relevance += 1; }
-    }
-    if (query.budget !== undefined) {
-      if (record.priceMax === null || record.currency !== "INR") missingFields.push("price");
-      else if (record.priceMax > query.budget) return [];
-      else { matchedFilters.push("budget"); relevance += 1; }
-    }
-    if (query.duration !== undefined) {
-      if (record.durationMins === null) missingFields.push("duration");
-      else if (record.durationMins > query.duration) return [];
-      else { matchedFilters.push("duration"); relevance += 1; }
-    }
-    if (query.intensity) {
-      if (record.intensity === null) missingFields.push("intensity");
-      else if (["LOW", "MODERATE", "HIGH"].indexOf(record.intensity) > ["LOW", "MODERATE", "HIGH"].indexOf(query.intensity)) return [];
-      else { matchedFilters.push("intensity"); relevance += 1; }
-    }
-    if (query.setting) {
-      if (record.setting === null) missingFields.push("setting");
-      else if (record.setting !== "EITHER" && record.setting !== query.setting) return [];
-      else { matchedFilters.push("setting"); relevance += 1; }
-    }
-    const uniqueMissingFields = [...new Set(missingFields)];
-    const proximityScore = distanceKm === null ? -20 : -distanceKm * 0.05;
-    const score = relevance + popularityScore + proximityScore - uniqueMissingFields.length * 0.5;
-    return [{ ...record, distanceKm, popularityScore, missingFields: uniqueMissingFields, matchedFilters, _rankScore: score }];
-  });
-  const rankedRecords = records.sort((a, b) => b._rankScore - a._rankScore).map(({ _rankScore: _score, ...record }) => record);
-  cache.set(cacheKey, { expiresAt: Date.now() + 60_000, records: rankedRecords });
-  for (const [key, value] of cache) if (value.expiresAt <= Date.now()) cache.delete(key);
-  if (cache.size > 500) cache.delete(cache.keys().next().value!);
   const experiences = rankedRecords.slice(offset, offset + limit);
-  return { experiences, hasMore: offset + experiences.length < rankedRecords.length, nextOffset: offset + experiences.length < rankedRecords.length ? offset + experiences.length : null } satisfies SearchPage;
+  const hasMore = offset + experiences.length < rankedRecords.length;
+  return { experiences, hasMore, nextOffset: hasMore ? offset + experiences.length : null };
 }
 
-export function placeSearchErrorCode(error: unknown) {
+/** Convert an internal place-search error into the route's stable error code. */
+export function placeSearchErrorCode(error: unknown): "NOT_CONFIGURED" | "UPSTREAM_FAILED" | "LOCATION_NOT_FOUND" | null {
   if (error instanceof Error && error.message === "EVENT_PROVIDER_NOT_CONFIGURED") return "NOT_CONFIGURED";
   if (error instanceof Error && error.message === "EVENT_PROVIDER_REQUEST_FAILED") return "UPSTREAM_FAILED";
   if (error instanceof Error && error.message === "EVENT_LOCATION_NOT_FOUND") return "LOCATION_NOT_FOUND";
