@@ -485,6 +485,10 @@ button:disabled {
 }
 .score-details summary {
   cursor: pointer;
+  padding: 8px 10px;
+  border: 1px solid #d8e1d8;
+  border-radius: 7px;
+  background: #f5f8f3;
   color: #344b3d;
   font-weight: 700;
 }
@@ -529,6 +533,21 @@ button:disabled {
     Georgia,
     serif;
   margin: 0;
+}
+.recommendation-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-top: 7px;
+  padding: 5px 9px;
+  border-radius: 20px;
+  background: #e9efe8;
+  color: #405b49;
+  font-size: 11px;
+}
+.recommendation-score strong {
+  font-size: 12px;
 }
 .card-description {
   font-size: 11px;

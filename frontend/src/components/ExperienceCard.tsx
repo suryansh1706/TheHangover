@@ -34,6 +34,7 @@ export function ExperienceCard({
         <div className="card-title-row">
           <h3>{item.name}</h3>
         </div>
+        {score != null && <div className="recommendation-score">Group score <strong>{Math.round(score * 100)} / 100</strong></div>}
         {!!item.missingFields?.length && <span className="verification-badge" title={`Unverified: ${item.missingFields.join(", ")}`}>Details unverified</span>}
         <p className="card-description">{item.description}</p>
         <div className="meta-row">
@@ -56,22 +57,28 @@ export function ExperienceCard({
               ` · ${item.eventLocalDate} ${item.eventLocalTime ?? ""} ${item.eventTimeZone ?? ""}`}
           </div>
         )}
-        {score != null && breakdown && typeof breakdown.preferenceContribution === "number" && (
+        {score != null && (
           <details className="score-details">
-            <summary>How is the {Math.round(score * 100)} / 100 score calculated?</summary>
-            <p className="score-formula">The score combines group preference fit and novelty, then adjusts for listing quality and place details.</p>
-            <dl className="score-breakdown">
-              <div><dt>Preference fit <small>(55% weakest member + 25% group average)</small></dt><dd>+{scorePoints(breakdown.preferenceContribution)} pts</dd></div>
-              <div><dt>Novelty <small>(20%; based on who has tried it)</small></dt><dd>+{scorePoints(breakdown.noveltyContribution)} pts</dd></div>
-              <div><dt>Matched filters</dt><dd>+{scorePoints(breakdown.filterBonus)} pts</dd></div>
-              <div><dt>Popularity</dt><dd>+{scorePoints(breakdown.popularityBonus)} pts</dd></div>
-              <div><dt>Distance from home</dt><dd>+{scorePoints(breakdown.proximityBonus)} pts</dd></div>
-              <div><dt>Unverified details</dt><dd>−{scorePoints(breakdown.missingInfoPenalty)} pts</dd></div>
-            </dl>
-            {!!memberScores && Object.keys(memberScores).length > 1 && (
-              <p className="member-fit-note">Member fit: {Object.values(memberScores).map((value, index) => `Member ${index + 1} ${Math.round(value * 100)}%`).join(" · ")}</p>
+            <summary>How is this score calculated?</summary>
+            {breakdown && typeof breakdown.preferenceContribution === "number" ? (
+              <>
+                <p className="score-formula">The score combines group preference fit and novelty, then adjusts for listing quality and place details.</p>
+                <dl className="score-breakdown">
+                  <div><dt>Preference fit <small>(55% weakest member + 25% group average)</small></dt><dd>+{scorePoints(breakdown.preferenceContribution)} pts</dd></div>
+                  <div><dt>Novelty <small>(20%; based on who has tried it)</small></dt><dd>+{scorePoints(breakdown.noveltyContribution)} pts</dd></div>
+                  <div><dt>Matched filters</dt><dd>+{scorePoints(breakdown.filterBonus)} pts</dd></div>
+                  <div><dt>Popularity</dt><dd>+{scorePoints(breakdown.popularityBonus)} pts</dd></div>
+                  <div><dt>Distance from home</dt><dd>+{scorePoints(breakdown.proximityBonus)} pts</dd></div>
+                  <div><dt>Unverified details</dt><dd>-{scorePoints(breakdown.missingInfoPenalty)} pts</dd></div>
+                </dl>
+                {!!memberScores && Object.keys(memberScores).length > 1 && (
+                  <p className="member-fit-note">Member fit: {Object.values(memberScores).map((value, index) => `Member ${index + 1} ${Math.round(value * 100)}%`).join(" · ")}</p>
+                )}
+                <small className="score-note">Contributions are added, then the result is capped between 0 and 100.</small>
+              </>
+            ) : (
+              <p className="score-note">This score is from the recommendation service. Redeploy the ML service to see its full breakdown.</p>
             )}
-            <small className="score-note">Contributions are added, then the result is capped between 0 and 100.</small>
           </details>
         )}
         <div className="card-actions">
