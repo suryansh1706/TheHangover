@@ -476,6 +476,47 @@ button:disabled {
   flex-direction: column;
   flex: 1;
 }
+.score-details {
+  margin: 12px 0 2px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  color: #48564c;
+  font-size: 12px;
+}
+.score-details summary {
+  cursor: pointer;
+  color: #344b3d;
+  font-weight: 700;
+}
+.score-formula,
+.member-fit-note,
+.score-note {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.score-breakdown {
+  margin: 8px 0;
+}
+.score-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+.score-breakdown dt small {
+  display: block;
+  color: #798278;
+  font-size: 10px;
+}
+.score-breakdown dd {
+  margin: 0;
+  white-space: nowrap;
+  font-weight: 650;
+}
+.score-note {
+  display: block;
+  color: #798278;
+}
 .card-title-row {
   display: flex;
   align-items: center;

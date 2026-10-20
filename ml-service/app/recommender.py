@@ -202,7 +202,13 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
         if request.groupConstraints.maxIntensity != "HIGH" and activity.intensity is not None: matched_filters.add("intensity")
         if request.groupConstraints.setting != "EITHER" and activity.setting is not None: matched_filters.add("setting")
         proximity = float(np.exp(-activity.distanceKm / 30)) if activity.distanceKm is not None else 0.0
-        final_score = group_score + 0.01 * len(matched_filters) + 0.015 * min(max(activity.popularityScore, 0), 12) + 0.15 * proximity - 0.025 * len(missing_fields)
+        preference_contribution = 0.55 * lowest_member + 0.25 * mean_score
+        novelty_contribution = 0.20 * novelty
+        filter_bonus = 0.01 * len(matched_filters)
+        popularity_bonus = 0.015 * min(max(activity.popularityScore, 0), 12)
+        proximity_bonus = 0.15 * proximity
+        missing_info_penalty = 0.025 * len(missing_fields)
+        final_score = preference_contribution + novelty_contribution + filter_bonus + popularity_bonus + proximity_bonus - missing_info_penalty
         candidates.append({
             "activity": activity,
             "score": final_score,
@@ -214,6 +220,12 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
             "novelty": novelty,
             "triedCount": tried_count,
             "structured": float(np.mean(structured_scores)),
+            "preferenceContribution": preference_contribution,
+            "noveltyContribution": novelty_contribution,
+            "filterBonus": filter_bonus,
+            "popularityBonus": popularity_bonus,
+            "proximityBonus": proximity_bonus,
+            "missingInfoPenalty": missing_info_penalty,
             "missingFields": sorted(missing_fields),
             "matchedFilters": sorted(matched_filters),
         })
@@ -252,6 +264,13 @@ def recommend(request: RecommendationRequest) -> dict[str, Any]:
                 "novelty": round(item["novelty"], 4),
                 "triedByCount": item["triedCount"],
                 "meetsHardConstraints": True,
+                "preferenceContribution": round(item["preferenceContribution"], 4),
+                "noveltyContribution": round(item["noveltyContribution"], 4),
+                "filterBonus": round(item["filterBonus"], 4),
+                "popularityBonus": round(item["popularityBonus"], 4),
+                "proximityBonus": round(item["proximityBonus"], 4),
+                "missingInfoPenalty": round(item["missingInfoPenalty"], 4),
+                "uncappedScore": round(item["score"], 4),
             },
             "reasons": reasons,
             "missingFields": item["missingFields"],

@@ -23,7 +23,6 @@ export function DiscoverPage() {
     useCurrentLocation,
     suggestions,
     invalidateRecommendations,
-    enjoymentModelVersion,
     filters,
     setFilters,
     busy,
@@ -158,10 +157,9 @@ export function DiscoverPage() {
                 key={item.activityId}
                 item={item.experience}
                 rank={index + 1}
-                reasons={item.reasons}
                 score={item.score}
-                predictedEnjoyment={item.predictedEnjoyment}
-                modelVersion={enjoymentModelVersion}
+                memberScores={item.memberScores}
+                breakdown={item.breakdown}
                 saved={shortlistedIds.has(item.activityId)}
                 onSave={() => addToShortlist(item.activityId)}
                 onTried={() => markTried(item.activityId, true)}

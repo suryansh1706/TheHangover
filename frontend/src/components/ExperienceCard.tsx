@@ -3,10 +3,9 @@ import { money } from "../utils/format";
 export function ExperienceCard({
   item,
   rank,
-  reasons,
   score,
-  predictedEnjoyment,
-  modelVersion,
+  memberScores,
+  breakdown,
   saved,
   onSave,
   onTried,
@@ -15,10 +14,9 @@ export function ExperienceCard({
 }: {
   item: Experience;
   rank?: number;
-  reasons?: string[];
   score?: number;
-  predictedEnjoyment?: Record<string, number>;
-  modelVersion?: string | null;
+  memberScores?: Record<string, number>;
+  breakdown?: Record<string, number | boolean>;
   saved: boolean;
   onSave: () => void;
   onTried: () => void;
@@ -58,25 +56,24 @@ export function ExperienceCard({
               ` · ${item.eventLocalDate} ${item.eventLocalTime ?? ""} ${item.eventTimeZone ?? ""}`}
           </div>
         )}
-        {reasons?.length ? (
-          <div className="why">
-            <strong>Why it fits</strong>
-            <ul>
-              {reasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-            {score != null && <small>Group score · {Math.round(score * 100)} / 100</small>}
-            {predictedEnjoyment && Object.keys(predictedEnjoyment).length > 0 && (
-              <p className="predicted-note">
-                Learned enjoyment estimate:{" "}
-                {Math.min(...Object.values(predictedEnjoyment)).toFixed(1)}–
-                {Math.max(...Object.values(predictedEnjoyment)).toFixed(1)} / 5 across members ·{" "}
-                {modelVersion}
-              </p>
+        {score != null && breakdown && typeof breakdown.preferenceContribution === "number" && (
+          <details className="score-details">
+            <summary>How is the {Math.round(score * 100)} / 100 score calculated?</summary>
+            <p className="score-formula">The score combines group preference fit and novelty, then adjusts for listing quality and place details.</p>
+            <dl className="score-breakdown">
+              <div><dt>Preference fit <small>(55% weakest member + 25% group average)</small></dt><dd>+{scorePoints(breakdown.preferenceContribution)} pts</dd></div>
+              <div><dt>Novelty <small>(20%; based on who has tried it)</small></dt><dd>+{scorePoints(breakdown.noveltyContribution)} pts</dd></div>
+              <div><dt>Matched filters</dt><dd>+{scorePoints(breakdown.filterBonus)} pts</dd></div>
+              <div><dt>Popularity</dt><dd>+{scorePoints(breakdown.popularityBonus)} pts</dd></div>
+              <div><dt>Distance from home</dt><dd>+{scorePoints(breakdown.proximityBonus)} pts</dd></div>
+              <div><dt>Unverified details</dt><dd>−{scorePoints(breakdown.missingInfoPenalty)} pts</dd></div>
+            </dl>
+            {!!memberScores && Object.keys(memberScores).length > 1 && (
+              <p className="member-fit-note">Member fit: {Object.values(memberScores).map((value, index) => `Member ${index + 1} ${Math.round(value * 100)}%`).join(" · ")}</p>
             )}
-          </div>
-        ) : null}
+            <small className="score-note">Contributions are added, then the result is capped between 0 and 100.</small>
+          </details>
+        )}
         <div className="card-actions">
           <button className={`button ${saved ? "subtle" : "outline"}`} onClick={onSave}>
             {saved ? "On shortlist" : "+ Shortlist"}
@@ -104,6 +101,9 @@ export function ExperienceCard({
       </div>
     </article>
   );
+}
+function scorePoints(value: number | boolean | undefined) {
+  return typeof value === "number" ? (value * 100).toFixed(1) : "0.0";
 }
 function symbol(category: string) {
   return (
