@@ -23,7 +23,7 @@ services:
     envVars:
       - fromGroup: thehangover-internal
       - key: USE_SEMANTIC_ENCODER
-        value: "false"
+        value: "true"
 
   - type: web
     name: thehangover-api
