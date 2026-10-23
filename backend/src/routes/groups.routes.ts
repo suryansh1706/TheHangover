@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../config/db.js";
-import { mlServiceTimeoutMs, mlServiceUrl } from "../services/mlService.js";
+import { requestMlService } from "../services/mlService.js";
 import { newToken, requireAuth, tokenDigest } from "../config/security.js";
 
 export const groupsRouter = Router();
@@ -232,7 +232,7 @@ groupsRouter.post("/:groupId/recommendations", async (request, response, next) =
     };
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (process.env.ML_SERVICE_TOKEN) headers["x-ml-service-token"] = process.env.ML_SERVICE_TOKEN;
-    const mlResponse = await fetch(`${mlServiceUrl()}/recommendations`, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(mlServiceTimeoutMs) });
+    const mlResponse = await requestMlService("/recommendations", { method: "POST", headers, body: JSON.stringify(payload) });
     if (!mlResponse.ok) {
       const upstreamBody = (await mlResponse.text()).slice(0, 2000);
       console.error("Recommendation service returned an error", {

@@ -228,7 +228,7 @@ The backend health check is `GET /health`. Main API areas are:
 - `/api/outings/:outingId/complete` and `/api/outings/:outingId/feedback`: finish an outing and submit member feedback.
 - `/api/analytics`: view feedback and model evaluation summaries.
 
-The ML service has `GET /health`, `POST /recommendations`, and `POST /models/train`. Backend-to-ML requests can use `ML_SERVICE_TOKEN` for service authentication. Exact input rules are validated by Zod in the backend and Pydantic in the ML service.
+The ML service has `GET /health`, `POST /recommendations`, and `POST /models/train`. The backend owns all ML requests and retries transient failures with bounded exponential backoff, which lets the ML service recover from a Render free-tier cold start without requiring the frontend to call a health URL. Backend-to-ML requests can use `ML_SERVICE_TOKEN` for service authentication. Exact input rules are validated by Zod in the backend and Pydantic in the ML service.
 
 ## Request and account safety
 
@@ -251,6 +251,13 @@ The repository includes frontend and backend tests, plus ML tests. Database-back
 ## Demo deployment
 
 The root `render.yaml` describes a Render demo with a static frontend, API, ML service, and managed PostgreSQL database. Connect the repository to Render and create a Blueprint from the `main` branch. The Blueprint wires service URLs and creates an internal ML token. The free demo selects TF-IDF so it can stay within the ML service memory limit; semantic embeddings are disabled there. Add a Geoapify key to the backend service to enable live searches.
+
+The current demo URLs are:
+
+- Website: <https://thehangover-frontend.onrender.com/>
+- ML service health check: <https://thehangover-ml.onrender.com/health>
+
+The ML health URL is for operational checks only. Do not add it to the frontend or use it as a browser-side wake-up mechanism. When a user requests recommendations, the backend calls the ML service directly. If the ML service is asleep on Render's free tier, that request wakes it and the backend retries transient cold-start failures with bounded exponential backoff. The first recommendation request after inactivity may therefore take longer.
 
 Wait for the database and services to report healthy before opening the frontend URL. The API applies Prisma migrations on startup. Free web services can sleep after 15 minutes without traffic, and the free database expires after 30 days. This setup is for trying the app, not storing important data. A real deployment still needs its settings, data retention, model storage, and service health checked in the provider dashboard.
 
